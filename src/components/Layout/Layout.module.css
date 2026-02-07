@@ -1,0 +1,174 @@
+/* ========================================
+   Layout 布局组件样式
+   基于 S19 Aesthetic Harmony 设计系统
+   ======================================== */
+
+/* 主布局 */
+.layout {
+    min-height: 100vh;
+    width: 100%;
+}
+
+/* 侧边栏 */
+.sidebar {
+    background: #001529 !important;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+/* Logo 区域 - 与 Header 同高，可拖动 */
+.logo {
+    height: 64px;
+    /* 与 Header 高度一致 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    -webkit-app-region: drag;
+    /* 侧边栏顶部可拖动 */
+}
+
+.logoIcon {
+    font-size: 28px;
+    flex-shrink: 0;
+}
+
+.logoText {
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 导航菜单 */
+.menu {
+    background: transparent !important;
+    border-right: none !important;
+    padding: 16px 8px;
+}
+
+.menu :global(.ant-menu-item) {
+    margin: 4px 0 !important;
+    border-radius: 8px !important;
+    height: 44px !important;
+    line-height: 44px !important;
+}
+
+.menu :global(.ant-menu-item-selected) {
+    background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%) !important;
+}
+
+.menu :global(.ant-menu-item:hover:not(.ant-menu-item-selected)) {
+    background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* 顶部导航栏 - 整个区域可拖动 */
+.header {
+    height: 64px;
+    background: #ffffff !important;
+    padding: 0 24px 0 80px !important;
+    /* 左侧为 macOS 交通灯预留空间 */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #E2E8F0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    -webkit-app-region: drag;
+    /* 整个导航栏可拖动 */
+}
+
+.headerLeft {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.headerRight {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.menuToggle {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+    -webkit-app-region: no-drag;
+    /* 按钮可点击 */
+}
+
+.menuToggle:hover {
+    color: #6366F1;
+    background: #F8FAFC;
+}
+
+.pageTitle {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1E293B;
+    margin: 0;
+}
+
+.iconButton {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+    border-radius: 8px;
+    -webkit-app-region: no-drag;
+    /* 按钮可点击 */
+}
+
+.iconButton:hover {
+    color: #6366F1;
+    background: #F8FAFC;
+}
+
+.userAvatar {
+    cursor: pointer;
+    transition: transform 200ms ease;
+    -webkit-app-region: no-drag;
+    /* 头像可点击 */
+}
+
+.userAvatar:hover {
+    transform: scale(1.05);
+}
+
+/* 内容区域 */
+.content {
+    margin: 24px;
+    padding: 24px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+    min-height: calc(100vh - 64px - 48px);
+    /* 64px = Header 高度 */
+    overflow: auto;
+}
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+    .header {
+        padding: 0 16px !important;
+    }
+
+    .content {
+        margin: 16px;
+        padding: 16px;
+        border-radius: 12px;
+    }
+
+    .pageTitle {
+        display: none;
+    }
+}
