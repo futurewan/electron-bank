@@ -1,7 +1,8 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Layout, Menu } from 'antd'
-import { Home, FileSearch, FileText, Settings } from 'lucide-react'
+import { Layout, Menu, Avatar, Tooltip } from 'antd'
+import { Home, FileSearch, FileText, Settings, LogOut } from 'lucide-react'
 import type { MenuProps } from 'antd'
+import { useAuthStore } from '../../stores/authStore'
 import styles from './Layout.module.css'
 
 const { Sider } = Layout
@@ -36,14 +37,26 @@ const menuItems: MenuProps['items'] = [
 
 /**
  * 侧边栏组件
- * 深色主题，包含导航菜单
+ * 深色主题，包含导航菜单和底部用户区域
  */
 function Sidebar({ collapsed }: SidebarProps): JSX.Element {
     const location = useLocation()
     const navigate = useNavigate()
+    const { user, logout } = useAuthStore()
 
     const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
         navigate(key)
+    }
+
+    const handleLogout = () => {
+        logout()
+        navigate('/login', { replace: true })
+    }
+
+    // 获取用户名首字符
+    const getAvatarText = (): string => {
+        if (!user?.username) return '?'
+        return user.username.charAt(0).toUpperCase()
     }
 
     return (
@@ -57,8 +70,8 @@ function Sidebar({ collapsed }: SidebarProps): JSX.Element {
         >
             {/* Logo 区域 */}
             <div className={styles.logo}>
-                {/* <div className={styles.logoIcon}>💰</div> */}
                 {!collapsed && <span className={styles.logoText}>AI 对账助手</span>}
+                {collapsed && <span className={styles.logoIcon}>💰</span>}
             </div>
 
             {/* 导航菜单 */}
@@ -70,6 +83,39 @@ function Sidebar({ collapsed }: SidebarProps): JSX.Element {
                 onClick={handleMenuClick}
                 className={styles.menu}
             />
+
+            {/* 底部用户区域 */}
+            <div className={styles.sidebarFooter}>
+                <div className={styles.userSection}>
+                    <Avatar
+                        size={collapsed ? 32 : 36}
+                        src={user?.avatar}
+                        style={{
+                            background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
+                            flexShrink: 0,
+                        }}
+                    >
+                        {getAvatarText()}
+                    </Avatar>
+                    {!collapsed && (
+                        <div className={styles.userDetails}>
+                            <span className={styles.userName}>{user?.username || '用户'}</span>
+                            <span className={styles.userStatus}>在线</span>
+                        </div>
+                    )}
+                </div>
+
+                {/* 退出按钮 */}
+                <Tooltip title="退出登录" placement="right">
+                    <button
+                        className={styles.logoutButton}
+                        onClick={handleLogout}
+                        aria-label="退出登录"
+                    >
+                        <LogOut size={18} />
+                    </button>
+                </Tooltip>
+            </div>
         </Sider>
     )
 }

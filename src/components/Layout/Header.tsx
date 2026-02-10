@@ -1,6 +1,6 @@
-import { Layout, Button, Avatar, Badge, Dropdown } from 'antd'
-import { Menu, Bell, User, LogOut, Settings } from 'lucide-react'
-import type { MenuProps } from 'antd'
+import { Layout, Button, Badge } from 'antd'
+import { Menu, Bell } from 'lucide-react'
+import UserInfo from '../UserInfo'
 import styles from './Layout.module.css'
 
 const { Header: AntHeader } = Layout
@@ -9,29 +9,6 @@ interface HeaderProps {
     collapsed: boolean
     onToggle: () => void
 }
-
-// 用户下拉菜单
-const userMenuItems: MenuProps['items'] = [
-    {
-        key: 'profile',
-        icon: <User size={16} />,
-        label: '个人信息',
-    },
-    {
-        key: 'settings',
-        icon: <Settings size={16} />,
-        label: '账户设置',
-    },
-    {
-        type: 'divider',
-    },
-    {
-        key: 'logout',
-        icon: <LogOut size={16} />,
-        label: '退出登录',
-        danger: true,
-    },
-]
 
 /**
  * 顶部导航栏组件
@@ -62,24 +39,11 @@ function Header({ collapsed: _collapsed, onToggle }: HeaderProps): JSX.Element {
                     />
                 </Badge>
 
-                {/* 用户头像下拉菜单 */}
-                <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-                    <div className={styles.userAvatar}>
-                        <Avatar
-                            size={36}
-                            style={{
-                                background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            管
-                        </Avatar>
-                    </div>
-                </Dropdown>
+                {/* 用户信息组件 */}
+                <UserInfo />
             </div>
         </AntHeader>
     )
 }
 
 export default Header
-
