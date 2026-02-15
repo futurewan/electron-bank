@@ -1,0 +1,130 @@
+/* ========================================
+   注册页面样式
+   基于 S19 Aesthetic Harmony 设计系统
+   ======================================== */
+
+/* 容器 - 全屏居中 */
+.container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #F8FAFC 0%, #E2E8F0 100%);
+    padding: 24px;
+}
+
+/* 注册卡片 */
+.card {
+    width: 100%;
+    max-width: 400px;
+    padding: 48px 40px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
+/* Logo 区域 */
+.logoSection {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.logoIcon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.title {
+    font-size: 24px;
+    font-weight: 600;
+    color: #1E293B;
+    margin: 0 0 8px;
+}
+
+.subtitle {
+    font-size: 14px;
+    color: #64748B;
+    margin: 0;
+}
+
+/* 输入框 */
+.input {
+    height: 48px !important;
+    border-radius: 8px !important;
+}
+
+.input:hover,
+.input:focus {
+    border-color: #6366F1 !important;
+}
+
+.inputIcon {
+    color: #94A3B8;
+}
+
+/* 注册按钮 */
+.submitButton {
+    height: 48px !important;
+    border-radius: 8px !important;
+    background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%) !important;
+    border: none !important;
+    font-size: 16px !important;
+    font-weight: 500 !important;
+    transition: all 200ms ease !important;
+}
+
+.submitButton:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4) !important;
+}
+
+.submitButton:active {
+    transform: translateY(0);
+}
+
+/* 登录链接 */
+.loginLink {
+    text-align: center;
+    color: #64748B;
+    font-size: 14px;
+    margin-top: 24px;
+}
+
+.link {
+    color: #6366F1;
+    font-weight: 500;
+    margin-left: 4px;
+    transition: color 200ms;
+}
+
+.link:hover {
+    color: #8B5CF6;
+}
+
+/* 底部版权 */
+.footer {
+    margin-top: 32px;
+    text-align: center;
+}
+
+.footer p {
+    color: #94A3B8;
+    font-size: 12px;
+    margin: 0;
+}
+
+/* 响应式 */
+@media (max-width: 480px) {
+    .card {
+        padding: 32px 24px;
+    }
+
+    .title {
+        font-size: 20px;
+    }
+
+    .logoIcon {
+        font-size: 40px;
+    }
+}

@@ -1,0 +1,39 @@
+/* ========================================
+   用户信息组件样式
+   参考百度网盘 "Hi >" 风格
+   ======================================== */
+
+/* 用户信息容器 */
+.userInfo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 6px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 200ms ease;
+    -webkit-app-region: no-drag;
+    /* 可点击 */
+}
+
+.userInfo:hover {
+    background: #F1F5F9;
+}
+
+/* 欢迎语 */
+.greeting {
+    font-size: 14px;
+    font-weight: 500;
+    color: #475569;
+}
+
+/* 箭头图标 */
+.arrow {
+    color: #94A3B8;
+    transition: transform 200ms ease;
+}
+
+.userInfo:hover .arrow {
+    color: #6366F1;
+    transform: translateX(2px);
+}
