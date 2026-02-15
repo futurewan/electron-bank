@@ -1,8 +1,8 @@
-import { useState } from 'react'
 import { Layout as AntLayout } from 'antd'
-import Sidebar from './Sidebar'
+import { useState } from 'react'
 import Header from './Header'
-import styles from './Layout.module.css'
+import styles from './Layout.module.scss'
+import Sidebar from './Sidebar'
 
 const { Content } = AntLayout
 

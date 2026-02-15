@@ -1,7 +1,7 @@
 import { HashRouter } from 'react-router-dom'
-import AppRouter from './router'
 import Layout from './components/Layout'
-import './index.css'
+import './index.scss'
+import AppRouter from './router'
 
 /**
  * 应用根组件

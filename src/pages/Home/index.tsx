@@ -1,132 +1,201 @@
-import { Card, Row, Col, Statistic, Button, Typography } from 'antd'
-import { FileSearch, FileCheck, AlertTriangle, TrendingUp, Plus, Upload } from 'lucide-react'
-import styles from './Home.module.css'
+import { Alert, Button, Card, Col, message, Row, Spin, Typography } from 'antd'
+import { CheckCircle } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import FolderConfigModal from '../../components/FolderConfigModal'
+import styles from './Home.module.scss'
 
 const { Title, Paragraph } = Typography
 
+// 获取 electron API
+const electron = (window as any).electron
+
+// 检查是否运行在 Electron 环境
+const isElectron = !!electron?.reconciliation
+
 /**
  * 首页组件
- * 展示数据概览、快捷操作和系统状态
+ * 展示欢迎信息和已完成任务列表
  */
 function Home(): JSX.Element {
-    // 模拟统计数据
-    const stats = [
-        {
-            title: '待对账',
-            value: 12,
-            icon: <FileSearch size={24} />,
-            color: '#6366F1',
-            bgColor: 'rgba(99, 102, 241, 0.1)',
-        },
-        {
-            title: '已完成',
-            value: 156,
-            icon: <FileCheck size={24} />,
-            color: '#10B981',
-            bgColor: 'rgba(16, 185, 129, 0.1)',
-        },
-        {
-            title: '异常项',
-            value: 3,
-            icon: <AlertTriangle size={24} />,
-            color: '#F59E0B',
-            bgColor: 'rgba(245, 158, 11, 0.1)',
-        },
-        {
-            title: '匹配率',
-            value: 98.5,
-            suffix: '%',
-            icon: <TrendingUp size={24} />,
-            color: '#8B5CF6',
-            bgColor: 'rgba(139, 92, 246, 0.1)',
-        },
-    ]
+    const navigate = useNavigate()
+
+    // 状态
+    const [loading, setLoading] = useState(false)
+    const [settingsModalVisible, setSettingsModalVisible] = useState(false)
+    const [folderConfig, setFolderConfig] = useState({})
+    const [completedBatches, setCompletedBatches] = useState<any[]>([])
+
+    // 加载已完成批次
+    const loadBatches = useCallback(async () => {
+        if (!isElectron) {
+            console.log('[Home] 非 Electron 环境，跳过加载批次')
+            return
+        }
+
+        try {
+            const result = await electron.reconciliation.getAllBatches()
+            if (result.success) {
+                // 只保留已完成 / 已归档的批次
+                const completed = (result.batches || []).filter(
+                    (b: any) => b.status === 'completed' || b.status === 'archived' || b.status === 'unbalanced'
+                )
+                setCompletedBatches(completed)
+            }
+        } catch (error) {
+            console.error('加载批次失败:', error)
+        }
+    }, [])
+
+    useEffect(() => {
+        loadBatches()
+    }, [loadBatches])
+
+    // 开始对账
+    const handleStartReconciliation = async () => {
+        if (!isElectron) {
+            message.error('此功能仅在 Electron 应用中可用，请使用桌面应用')
+            return
+        }
+
+        try {
+            setLoading(true)
+            // 检查工作目录配置
+            const res = await electron.config.getAll()
+            const config = res.config || {}
+
+            if (!config.workspaceFolder) {
+                setFolderConfig(config)
+                setSettingsModalVisible(true)
+                return
+            }
+
+            // 验证工作目录
+            const validation = await electron.file.validateWorkspace(config.workspaceFolder)
+            if (validation.rebuilt) {
+                message.info('工作目录已自动重建，请确保已上传对账数据到相应文件夹')
+            }
+
+            // 自动生成批次名称：日期+对账
+            const date = new Date()
+            const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+            const baseName = `${dateStr}对账`
+
+            let finalName = baseName
+            let counter = 2
+
+            // 检查重名
+            const allResult = await electron.reconciliation.getAllBatches()
+            const existingNames = new Set((allResult.batches || []).map((b: any) => b.name))
+            while (existingNames.has(finalName)) {
+                finalName = `${baseName}-${counter}`
+                counter++
+            }
+
+            navigate('/reconciliation', { state: { autoStart: true, batchName: finalName } })
+        } catch (error) {
+            console.error('检查配置失败:', error)
+            message.error('检查系统配置失败')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    // 格式化日期
+    const formatDate = (date: any) => {
+        if (!date) return '-'
+        try {
+            const d = new Date(date)
+            return isNaN(d.getTime()) ? '-' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        } catch {
+            return '-'
+        }
+    }
 
     return (
-        <div className={styles.home}>
-            {/* 欢迎区域 */}
-            <section className={styles.welcome}>
-                <div className={styles.welcomeContent}>
-                    <Title level={2} className={styles.welcomeTitle}>
-                        👋 欢迎使用 AI 对账助手
-                    </Title>
-                    <Paragraph className={styles.welcomeDesc}>
-                        智能对账，轻松管理。支持自动对账、生成对账单、生成对账报告。
-                    </Paragraph>
-                </div>
-                <div className={styles.welcomeActions}>
-                    <Button
-                        type="primary"
-                        size="large"
-                        icon={<Plus size={18} />}
-                        className={styles.primaryBtn}
-                    >
-                        新建对账
-                    </Button>
-                    <Button
-                        size="large"
-                        icon={<Upload size={18} />}
-                    >
-                        导入数据
-                    </Button>
-                </div>
-            </section>
+        <Spin spinning={loading} tip="处理中...">
+            <div className={styles.home}>
+                {/* 浏览器环境提示 */}
+                {!isElectron && (
+                    <Alert
+                        message="浏览器模式"
+                        description="当前在浏览器中运行，功能受限。请使用 Electron 桌面应用以获得完整功能。"
+                        type="warning"
+                        showIcon
+                        style={{ marginBottom: 16 }}
+                    />
+                )}
 
-            {/* 数据统计卡片 */}
-            <section className={styles.statsSection}>
-                <Row gutter={[24, 24]}>
-                    {stats.map((stat, index) => (
-                        <Col xs={12} sm={12} md={6} key={index}>
-                            <Card className={styles.statsCard} bordered={false}>
-                                <div className={styles.statsIcon} style={{ background: stat.bgColor, color: stat.color }}>
-                                    {stat.icon}
-                                </div>
-                                <Statistic
-                                    title={stat.title}
-                                    value={stat.value}
-                                    suffix={stat.suffix}
-                                    valueStyle={{ color: stat.color }}
-                                />
-                            </Card>
-                        </Col>
-                    ))}
-                </Row>
-            </section>
+                {/* 欢迎区域 */}
+                <section className={styles.welcome}>
+                    <div className={styles.welcomeContent}>
+                        <Title level={2} className={styles.welcomeTitle}>
+                            👋 欢迎使用 AI 对账助手
+                        </Title>
+                        <Paragraph className={styles.welcomeDesc}>
+                            智能对账，轻松管理。支持自动对账、生成对账单、生成对账报告。
+                        </Paragraph>
+                    </div>
+                    <div className={styles.welcomeActions}>
+                        <Button
+                            type="primary"
+                            size="large"
+                            className={styles.primaryBtn}
+                            onClick={handleStartReconciliation}
+                            style={{
+                                fontSize: '18px',
+                                height: '56px',
+                                padding: '0 48px',
+                                borderRadius: '12px',
+                            }}
+                        >
+                            开始对账
+                        </Button>
+                    </div>
+                </section>
 
-            {/* 快捷操作区域 */}
-            <section className={styles.quickActions}>
-                <Title level={4}>快捷操作</Title>
-                <Row gutter={[16, 16]}>
-                    <Col xs={24} sm={12} md={8}>
-                        <Card hoverable className={styles.actionCard}>
-                            <div className={styles.actionIcon}>📤</div>
-                            <div className={styles.actionContent}>
-                                <Title level={5}>导入账单</Title>
-                                <Paragraph type="secondary">支持 Excel、CSV 格式</Paragraph>
-                            </div>
-                        </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={8}>
-                        <Card hoverable className={styles.actionCard}>
-                            <div className={styles.actionIcon}>🔍</div>
-                            <div className={styles.actionContent}>
-                                <Title level={5}>智能对账</Title>
-                                <Paragraph type="secondary">AI 自动匹配账目</Paragraph>
-                            </div>
-                        </Card>
-                    </Col>
-                    <Col xs={24} sm={12} md={8}>
-                        <Card hoverable className={styles.actionCard}>
-                            <div className={styles.actionIcon}>📊</div>
-                            <div className={styles.actionContent}>
-                                <Title level={5}>生成报告</Title>
-                                <Paragraph type="secondary">导出对账分析报告</Paragraph>
-                            </div>
-                        </Card>
-                    </Col>
-                </Row>
-            </section>
-        </div>
+                {/* 已完成任务列表 */}
+                {completedBatches.length > 0 && (
+                    <section className={styles.quickActions}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <Title level={4} style={{ margin: 0 }}>已完成任务</Title>
+                            <Button type="link" onClick={() => navigate('/reconciliation')}>查看全部对账管理</Button>
+                        </div>
+                        <Row gutter={[16, 16]}>
+                            {completedBatches.slice(0, 6).map((batch) => (
+                                <Col xs={24} sm={12} md={8} key={batch.id}>
+                                    <Card
+                                        size="small"
+                                        hoverable
+                                        onClick={() => navigate(`/reconciliation/${batch.id}`)}
+                                        style={{ borderColor: '#e5e7eb', borderRadius: 12 }}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontWeight: 500 }}>{batch.name}</span>
+                                            <CheckCircle size={16} color="#10B981" />
+                                        </div>
+                                        <div style={{ marginTop: 8, color: '#64748b', fontSize: 12 }}>
+                                            {formatDate(batch.completedAt || batch.createdAt)} · 匹配: {batch.matchedCount || 0} · 异常: {batch.exceptionCount || 0}
+                                        </div>
+                                    </Card>
+                                </Col>
+                            ))}
+                        </Row>
+                    </section>
+                )}
+            </div>
+
+            {/* 工作目录配置弹窗 */}
+            <FolderConfigModal
+                open={settingsModalVisible}
+                onCancel={() => setSettingsModalVisible(false)}
+                onSuccess={() => {
+                    setSettingsModalVisible(false)
+                    handleStartReconciliation()
+                }}
+                config={folderConfig}
+            />
+        </Spin>
     )
 }
 

@@ -1,9 +1,9 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
 import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
+import React from 'react'
+import ReactDOM from 'react-dom/client'
 import App from './App'
-import './index.css'
+import './index.scss'
 
 // Ant Design 主题配置 - 基于 S19 Aesthetic Harmony
 const theme = {

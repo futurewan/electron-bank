@@ -1,7 +1,7 @@
-import { Layout, Button, Avatar, Badge, Dropdown } from 'antd'
-import { Menu, Bell, User, LogOut, Settings } from 'lucide-react'
 import type { MenuProps } from 'antd'
-import styles from './Layout.module.css'
+import { Avatar, Badge, Button, Dropdown, Layout } from 'antd'
+import { Bell, LogOut, Menu, Settings, User } from 'lucide-react'
+import styles from './Layout.module.scss'
 
 const { Header: AntHeader } = Layout
 

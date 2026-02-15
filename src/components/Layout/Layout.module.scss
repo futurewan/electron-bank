@@ -5,8 +5,17 @@
 
 /* 主布局 */
 .layout {
-    min-height: 100vh;
+    height: 100vh !important;
     width: 100%;
+    overflow: hidden !important;
+}
+
+/* 内部布局容器 (Header + Content) */
+.layout > :global(.ant-layout) {
+    height: 100% !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden !important;
 }
 
 /* 侧边栏 */
@@ -151,9 +160,8 @@
     background: #ffffff;
     border-radius: 16px;
     box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
-    min-height: calc(100vh - 64px - 48px);
-    /* 64px = Header 高度 */
-    overflow: auto;
+    overflow-y: auto;
+    flex: 1;
 }
 
 /* 响应式适配 */

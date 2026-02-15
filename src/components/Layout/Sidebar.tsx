@@ -1,8 +1,8 @@
-import { useLocation, useNavigate } from 'react-router-dom'
-import { Layout, Menu } from 'antd'
-import { Home, FileSearch, FileText, Settings } from 'lucide-react'
 import type { MenuProps } from 'antd'
-import styles from './Layout.module.css'
+import { Layout, Menu } from 'antd'
+import { FileSearch, FileText, Home, Settings, Users } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import styles from './Layout.module.scss'
 
 const { Sider } = Layout
 
@@ -21,6 +21,11 @@ const menuItems: MenuProps['items'] = [
         key: '/reconciliation',
         icon: <FileSearch size={18} />,
         label: '对账管理',
+    },
+    {
+        key: '/payer-mappings',
+        icon: <Users size={18} />,
+        label: '映射管理',
     },
     {
         key: '/reports',
@@ -46,6 +51,17 @@ function Sidebar({ collapsed }: SidebarProps): JSX.Element {
         navigate(key)
     }
 
+    // 计算当前应该高亮的菜单项
+    const getSelectedKey = () => {
+        const path = location.pathname
+        if (path === '/') return '/'
+        if (path.startsWith('/reconciliation')) return '/reconciliation'
+        if (path.startsWith('/payer-mappings')) return '/payer-mappings'
+        if (path.startsWith('/reports')) return '/reports'
+        if (path.startsWith('/settings')) return '/settings'
+        return path
+    }
+
     return (
         <Sider
             trigger={null}
@@ -57,7 +73,6 @@ function Sidebar({ collapsed }: SidebarProps): JSX.Element {
         >
             {/* Logo 区域 */}
             <div className={styles.logo}>
-                {/* <div className={styles.logoIcon}>💰</div> */}
                 {!collapsed && <span className={styles.logoText}>AI 对账助手</span>}
             </div>
 
@@ -65,7 +80,7 @@ function Sidebar({ collapsed }: SidebarProps): JSX.Element {
             <Menu
                 theme="dark"
                 mode="inline"
-                selectedKeys={[location.pathname]}
+                selectedKeys={[getSelectedKey()]}
                 items={menuItems}
                 onClick={handleMenuClick}
                 className={styles.menu}
