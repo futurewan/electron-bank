@@ -419,18 +419,36 @@ async function generateExceptionReport(
   ]
 
   for (const exc of allExceptions) {
-    // 解析银行流水详情
+    // 解析详情
     let bankDetail = ''
     try {
       const parsed = JSON.parse(exc.detail || '{}')
-      if (parsed.payerName) {
+      if (exc.type === 'NO_INVOICE') {
+        // 有水无票：显示银行流水信息
+        bankDetail = `银行流水: ${parsed.payerName || '未知付款人'} ¥${parsed.amount || ''}`
+        if (parsed.transactionDate) bankDetail += ` (${formatDate(parsed.transactionDate)})`
+        if (parsed.remark) bankDetail += ` [备注: ${parsed.remark}]`
+      } else if (exc.type === 'NO_BANK_TXN') {
+        // 有票无水：显示发票信息
+        bankDetail = `发票: ${parsed.sellerName || '未知销售方'} ¥${parsed.amount || ''}`
+        if (parsed.invoiceNumber) bankDetail += ` (号: ${parsed.invoiceNumber})`
+        if (parsed.invoiceDate) bankDetail += ` (${formatDate(parsed.invoiceDate)})`
+      } else if (exc.type === 'DUPLICATE_PAYMENT' && parsed.currentTx) {
+        bankDetail = `流水: ${parsed.currentTx.payer || ''} ¥${parsed.currentTx.amount || ''} (${formatDate(parsed.currentTx.date)})`
+        if (parsed.previousTx) {
+          bankDetail += ` | 与前一笔日期差: ${parsed.daysDiff}天`
+        }
+      } else if (parsed.payerName) {
         bankDetail = `${parsed.payerName} ¥${parsed.amount || ''}`
         if (parsed.transactionDate) bankDetail += ` (${formatDate(parsed.transactionDate)})`
         if (parsed.remark) bankDetail += ` 备注: ${parsed.remark}`
-      } else if (parsed.currentTx) {
-        bankDetail = `${parsed.currentTx.payer || ''} ¥${parsed.currentTx.amount || ''}`
       } else {
-        bankDetail = JSON.stringify(parsed).substring(0, 100)
+        // 后备逻辑：提取所有非 ID 的核心字段
+        const coreInfo = Object.entries(parsed)
+          .filter(([key]) => !key.toLowerCase().includes('id') && !key.toLowerCase().includes('path'))
+          .map(([key, val]) => `${key}: ${val}`)
+          .join(', ')
+        bankDetail = coreInfo || exc.detail || ''
       }
     } catch {
       bankDetail = exc.detail || ''

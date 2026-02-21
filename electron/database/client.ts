@@ -178,6 +178,7 @@ function initializeTables(sqlite: Database.Database): void {
       amount_diff REAL,
       needs_confirmation INTEGER DEFAULT 0,
       confirmed INTEGER DEFAULT 0,
+      proxy_info TEXT,
       created_at INTEGER NOT NULL
     )
   `)
@@ -244,6 +245,8 @@ function initializeTables(sqlite: Database.Database): void {
       { name: 'tax_rate', type: 'TEXT' },
       { name: 'invoice_type', type: 'TEXT' },
       { name: 'item_name', type: 'TEXT' },
+      { name: 'remark', type: 'TEXT' },
+      { name: 'issuer', type: 'TEXT' },
       { name: 'parse_source', type: 'TEXT' },
       { name: 'source_file_path', type: 'TEXT' }
     ]
@@ -253,6 +256,15 @@ function initializeTables(sqlite: Database.Database): void {
         console.log(`[Database] 迁移: 向 invoices 表添加 ${col.name} 列`)
         sqlite.exec(`ALTER TABLE invoices ADD COLUMN ${col.name} ${col.type}`)
       }
+    }
+
+    // 3. match_results 表迁移
+    const matchTableInfo = sqlite.prepare('PRAGMA table_info(match_results)').all() as any[]
+    const matchColumns = matchTableInfo.map(col => col.name)
+
+    if (!matchColumns.includes('proxy_info')) {
+      console.log('[Database] 迁移: 向 match_results 表添加 proxy_info 列')
+      sqlite.exec('ALTER TABLE match_results ADD COLUMN proxy_info TEXT')
     }
 
   } catch (err) {

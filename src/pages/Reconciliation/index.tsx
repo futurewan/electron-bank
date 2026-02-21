@@ -198,7 +198,7 @@ const ReconciliationManagement: React.FC = () => {
                                 const fName = err.filePath.split(/[\\/]/).pop()
                                 errorDetails = ` (${fName}: ${err.error})`
                             }
-                            message.error('PDF 解析失败: ' + exportRes.error + errorDetails)
+                            message.error('PDF 解析失败: ' + (exportRes.error || '未知错误') + errorDetails)
                             return
                         }
                     }

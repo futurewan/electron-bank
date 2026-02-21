@@ -94,6 +94,7 @@ export async function executeReconciliation(
   clearStopFlag(batchId)
 
   try {
+    let finalStats: MatchingStats
     // 阶段 1: 规则匹配
     if (isStopped(batchId)) throw new Error('任务被用户停止')
     onProgress?.({
@@ -171,15 +172,36 @@ export async function executeReconciliation(
         stats: aiMatchStats || ruleMatchStats,
       })
 
-      const { detectExceptions } = await import('./exceptionService')
+      const { detectExceptions, diagnoseExceptionsWithAI } = await import('./exceptionService')
       const exceptionResult = await detectExceptions(batchId)
       totalExceptions = exceptionResult.totalExceptions
 
       console.log(`[Reconciliation] 异常检测完成: ${totalExceptions} 个异常`)
-    }
 
-    // 完成
-    const finalStats = await getMatchingStats(batchId)
+      // 完成
+      finalStats = await getMatchingStats(batchId) // Assign finalStats here
+
+      // 阶段 3.5: AI 异常诊断分析
+      if (totalExceptions > 0 && finalConfig.enableAI) {
+        onProgress?.({
+          stage: 'exception_detection',
+          percentage: 90,
+          message: '正在使用 AI 诊断异常项...',
+          stats: finalStats,
+        })
+        await diagnoseExceptionsWithAI(batchId, (current, total, message) => {
+          onProgress?.({
+            stage: 'exception_detection',
+            percentage: 90 + Math.floor((current / total) * 9),
+            message: `[AI 诊断] ${message}`,
+            stats: finalStats,
+          })
+        })
+      }
+    } else {
+      // If exception detection is skipped, finalStats should still be calculated
+      finalStats = await getMatchingStats(batchId)
+    }
 
     // 只有当完全匹配时才标记为 completed，否则为 unbalanced
     const isBalanced = finalStats.remainingBankCount === 0 && finalStats.remainingInvoiceCount === 0

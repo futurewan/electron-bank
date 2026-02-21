@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DownloadOutlined, SyncOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Col, List, message, Modal, Progress, Row, Space, Spin, Statistic, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Col, List, message, Modal, Progress, Row, Space, Spin, Statistic, Table, Tag, Tooltip, Typography } from 'antd'
 import React, { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { FileInfo } from '../../components/ImportConfirmModal'
@@ -38,7 +38,8 @@ interface ExceptionItem {
   severity: 'high' | 'medium' | 'low'
   suggestion: string
   status: string
-  detail?: any
+  detail?: string
+  invoiceSourceFilePath?: string | null
 }
 
 interface ReportInfo {
@@ -291,6 +292,52 @@ const ReconciliationDetail: React.FC = () => {
       message.error('操作失败')
     }
   }
+  const handleConfirmIndividualMatch = async (record: any) => {
+    const hasProxyInfo = !!record.proxyInfo
+
+    const performConfirm = async (shouldSave: boolean) => {
+      try {
+        const res = await electron.reconciliation.confirmMatch({
+          matchId: record.id,
+          saveMapping: shouldSave
+        })
+        if (res.success) {
+          message.success('已确认匹配')
+          // 更新本地状态
+          setDetailsData(prev => prev.map(item =>
+            item.id === record.id ? { ...item, confirmed: true } : item
+          ))
+          loadData()
+        } else {
+          message.error('确认失败: ' + res.error)
+        }
+      } catch (e) {
+        message.error('操作失败')
+      }
+    }
+
+    if (hasProxyInfo) {
+      let proxyData: any = {}
+      try {
+        proxyData = JSON.parse(record.proxyInfo)
+      } catch (e) { }
+
+      Modal.confirm({
+        title: '确认代付关系',
+        content: `系统检测到 ${proxyData.personName} 为 ${proxyData.companyName} 代付。是否确认此匹配并保存此代付关系到数据库？`,
+        okText: '确认并保存关系',
+        cancelText: '仅确认匹配',
+        onOk: () => performConfirm(true),
+        onCancel: (close) => {
+          if (close.triggerCancel) return; // 点击遮罩或取消按钮不做操作
+          performConfirm(false)
+        },
+        closable: true,
+      })
+    } else {
+      performConfirm(false)
+    }
+  }
 
   const renderExceptionType = (type: string) => {
     const map: Record<string, string> = {
@@ -319,6 +366,7 @@ const ReconciliationDetail: React.FC = () => {
       case 'tolerance': return '容差匹配'
       case 'proxy': return '代付匹配'
       case 'ai': return 'AI 匹配'
+      case 'explainable': return '可解释性匹配'
       default: return '匹配详情'
     }
   }
@@ -328,19 +376,78 @@ const ReconciliationDetail: React.FC = () => {
   const explainableCount = (stats?.toleranceCount || 0) + (stats?.proxyCount || 0) + (stats?.aiCount || 0)
   const exceptionCount = exceptions.length
 
-  // 解析异常详情
-  const parseExceptionDetail = (detail: string | undefined): string => {
-    if (!detail) return ''
+  // 从路径字符串中提取文件名
+  const getFileNameFromPath = (filePath?: string | null): string | undefined => {
+    if (!filePath) return undefined
+    // 同时支持正斜杠（macOS/Linux）和反斜杠（Windows）
+    const parts = filePath.replace(/\\/g, '/').split('/')
+    return parts[parts.length - 1] || undefined
+  }
+
+  // 解析异常详情 - 返回结构化对象（record 可选，用于补充 invoiceSourceFilePath）
+  const parseExceptionDetailObj = (
+    detail: string | undefined,
+    record?: ExceptionItem
+  ): { payerName?: string; amount?: number; transactionDate?: string; sellerName?: string; invoiceNumber?: string; remark?: string; invoiceFileName?: string } => {
+    if (!detail) return {}
     try {
       const parsed = JSON.parse(detail)
+      // 优先使用 JOIN 查询到的 invoiceSourceFilePath，其次用 detail 里的 sourceFilePath
+      const resolvedFilePath = record?.invoiceSourceFilePath || parsed.sourceFilePath
+
       if (parsed.payerName) {
-        return `${parsed.payerName} ¥${parsed.amount || ''}`
+        // NO_INVOICE 类型
+        return {
+          payerName: parsed.payerName,
+          amount: parsed.amount,
+          transactionDate: parsed.transactionDate,
+          remark: parsed.remark,
+        }
+      } else if (parsed.sellerName) {
+        // NO_BANK_TXN 类型
+        return {
+          sellerName: parsed.sellerName,
+          amount: parsed.amount,
+          invoiceNumber: parsed.invoiceNumber,
+          invoiceFileName: getFileNameFromPath(resolvedFilePath),
+        }
       } else if (parsed.currentTx) {
-        return `${parsed.currentTx.payer || ''} ¥${parsed.currentTx.amount || ''}`
+        // DUPLICATE_PAYMENT 类型
+        return {
+          payerName: parsed.currentTx.payer,
+          amount: parsed.currentTx.amount,
+          transactionDate: parsed.currentTx.date,
+        }
+      } else if (parsed.amountDiff !== undefined) {
+        // AMOUNT_MISMATCH 类型
+        return {
+          amount: parsed.amountDiff,
+          invoiceFileName: getFileNameFromPath(resolvedFilePath),
+        }
       }
-      return ''
+      return {}
     } catch {
-      return detail
+      return {}
+    }
+  }
+
+  // 获取异常显示名称
+  const getExceptionName = (record: ExceptionItem): string => {
+    const obj = parseExceptionDetailObj(record.detail)
+    if (record.type === 'NO_INVOICE') return obj.payerName || ''
+    if (record.type === 'NO_BANK_TXN') return obj.sellerName || ''
+    if (record.type === 'DUPLICATE_PAYMENT') return obj.payerName || ''
+    return ''
+  }
+
+  const formatDate = (val: string | undefined): string => {
+    if (!val) return '-'
+    try {
+      const d = new Date(val)
+      if (isNaN(d.getTime())) return '-'
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    } catch {
+      return '-'
     }
   }
 
@@ -411,7 +518,7 @@ const ReconciliationDetail: React.FC = () => {
             </Card>
           </Col>
           <Col span={8}>
-            <Card hoverable onClick={() => handleShowDetails('tolerance')} style={{ cursor: 'pointer', borderLeft: '4px solid #1890ff' }}>
+            <Card hoverable onClick={() => handleShowDetails('explainable')} style={{ cursor: 'pointer', borderLeft: '4px solid #1890ff' }}>
               <Statistic
                 title="💡 可解释性匹配"
                 value={explainableCount}
@@ -448,6 +555,7 @@ const ReconciliationDetail: React.FC = () => {
                 <Table
                   dataSource={exceptions}
                   rowKey="id"
+                  scroll={{ x: 1000 }}
                   pagination={{
                     pageSize: exceptionPageSize,
                     onShowSizeChange: (_, size) => setExceptionPageSize(size),
@@ -456,13 +564,57 @@ const ReconciliationDetail: React.FC = () => {
                     showTotal: (total) => `共 ${total} 条`
                   }}
                   columns={[
-                    { title: '风险等级', dataIndex: 'severity', width: 100, render: renderSeverity },
-                    { title: '异常类型', dataIndex: 'type', width: 120, render: renderExceptionType },
-                    { title: '银行流水详情', dataIndex: 'detail', ellipsis: true, render: (val: string) => parseExceptionDetail(val) },
-                    { title: 'AI建议操作', dataIndex: 'suggestion', ellipsis: true },
+                    { title: '风险等级', dataIndex: 'severity', width: 80, render: renderSeverity },
+                    { title: '异常类型', dataIndex: 'type', width: 100, render: renderExceptionType },
+                    {
+                      title: '对方名称',
+                      width: 180,
+                      ellipsis: true,
+                      render: (_, record) => getExceptionName(record)
+                    },
+                    {
+                      title: '金额',
+                      width: 120,
+                      align: 'right' as const,
+                      render: (_, record) => {
+                        const obj = parseExceptionDetailObj(record.detail)
+                        return obj.amount ? <Text strong style={{ color: '#ff4d4f' }}>¥{Number(obj.amount).toFixed(2)}</Text> : '-'
+                      }
+                    },
+                    {
+                      title: '交易日期',
+                      width: 110,
+                      render: (_, record) => {
+                        const obj = parseExceptionDetailObj(record.detail)
+                        return formatDate(obj.transactionDate)
+                      }
+                    },
+                    {
+                      title: '发票文件',
+                      width: 280,
+                      ellipsis: true,
+                      render: (_, record) => {
+                        // 优先从 JOIN 关联的 invoiceSourceFilePath 直接取文件名
+                        const directName = getFileNameFromPath(record.invoiceSourceFilePath)
+                        const obj = parseExceptionDetailObj(record.detail, record)
+                        const displayName = directName || obj.invoiceFileName
+                        return displayName ? (
+                          <Text type="secondary" title={displayName} style={{ fontSize: 12 }}>
+                            📄 {displayName}
+                          </Text>
+                        ) : '-'
+                      }
+                    },
+                    {
+                      title: '备注', dataIndex: 'detail', width: 120, ellipsis: true, render: (val: string) => {
+                        const obj = parseExceptionDetailObj(val)
+                        return obj.remark || '-'
+                      }
+                    },
+                    { title: 'AI建议', dataIndex: 'suggestion', ellipsis: true },
                     {
                       title: '操作',
-                      width: 160,
+                      width: 140,
                       render: (_, record) => (
                         <Space>
                           {record.status === 'pending' && (
@@ -474,6 +626,9 @@ const ReconciliationDetail: React.FC = () => {
                           {record.status !== 'pending' && (
                             <Tag color="default">{record.status === 'resolved' ? '已解决' : '已忽略'}</Tag>
                           )}
+                          <Tooltip title="敬请期待">
+                            <Button size="small" type="link" disabled style={{ color: '#ccc', cursor: 'not-allowed' }}>反馈AI</Button>
+                          </Tooltip>
                         </Space>
                       )
                     }
@@ -586,8 +741,31 @@ const ReconciliationDetail: React.FC = () => {
               { title: '发票方', dataIndex: 'invoiceSeller', width: 200 },
               { title: '发票金额', dataIndex: 'invoiceAmount', width: 100, align: 'right', render: (val: number) => val?.toFixed(2) },
               { title: '差异', dataIndex: 'amountDiff', width: 100, align: 'right', render: (val: number) => val !== 0 ? <span style={{ color: 'red' }}>{val?.toFixed(2)}</span> : '-' },
-              { title: '原因', dataIndex: 'reason' },
+              { title: '原因', dataIndex: 'reason', width: 200, },
               { title: '置信度', dataIndex: 'confidence', width: 80, render: (val: number) => (val * 100).toFixed(0) + '%' },
+              {
+                title: '状态',
+                width: 100,
+                render: (_, record) => (
+                  record.confirmed ? <Tag color="success">已确认</Tag> : <Tag color="warning">待确认</Tag>
+                )
+              },
+              {
+                title: '操作',
+                width: 150,
+                render: (_, record) => {
+                  if (record.confirmed) return null;
+                  return (
+                    <Button
+                      size="small"
+                      type="link"
+                      onClick={() => handleConfirmIndividualMatch(record)}
+                    >
+                      确认
+                    </Button>
+                  );
+                }
+              }
             ]}
           />
         </Modal>

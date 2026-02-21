@@ -93,6 +93,7 @@ export const RECONCILIATION_CHANNELS = {
   EXECUTE_RULE_MATCHING: 'reconciliation:execute-rule-matching',
   GET_MATCHING_STATS: 'reconciliation:get-matching-stats',
   GET_MATCH_RESULTS: 'reconciliation:get-match-results',
+  CONFIRM_MATCH: 'reconciliation:confirm-match',
 
   // AI 匹配
   EXECUTE_AI_MATCHING: 'reconciliation:execute-ai-matching',

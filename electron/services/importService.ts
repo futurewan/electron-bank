@@ -2,7 +2,7 @@
  * 导入服务
  * 负责将解析后的数据存入数据库
  */
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import path from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
 import { getDatabase } from '../database/client'
@@ -134,7 +134,7 @@ export async function getAllBatches() {
   const db = getDatabase()
   return db.select()
     .from(reconciliationBatches)
-    .orderBy(reconciliationBatches.createdAt)
+    .orderBy(desc(reconciliationBatches.createdAt))
 }
 
 /**
@@ -315,6 +315,15 @@ export async function importInvoices(
     invoiceDate: item.invoiceDate,
     status: 'pending' as const,
     createdAt: now,
+    buyerName: item.buyerName,
+    buyerTaxId: item.buyerTaxId,
+    sellerTaxId: item.sellerTaxId,
+    taxAmount: item.taxAmount,
+    taxRate: item.taxRate,
+    itemName: item.itemNames,
+    remark: item.remark,
+    issuer: item.issuer,
+    sourceFilePath: item.sourceFilePath || filePath,
   }))
 
   // 分批插入
@@ -419,14 +428,14 @@ export async function importPdfInvoices(
   const db = getDatabase()
   const now = new Date()
 
-  // ---- 跨批次去重 ----
-  // 获取数据库中所有已有的发票记录用于去重比对
+  // ---- 批次内去重 ----
+  // 仅查询当前批次内已有的发票记录用于去重（不跨批次，每个批次是独立对账单元）
   const existingInvoices = await db.select({
     invoiceNumber: invoices.invoiceNumber,
     sellerName: invoices.sellerName,
     amount: invoices.amount,
     invoiceDate: invoices.invoiceDate,
-  }).from(invoices)
+  }).from(invoices).where(eq(invoices.batchId, batchId))
 
   // 构建已有发票的去重键集合
   const existingKeys = new Set<string>()
@@ -458,7 +467,7 @@ export async function importPdfInvoices(
       result.skippedDuplicates.push({
         invoiceNumber: inv.invoiceNumber,
         fileName: inv.fileName || path.basename(inv.filePath),
-        reason: '跨批次重复',
+        reason: '批次内重复',
       })
     } else {
       toImport.push(inv)

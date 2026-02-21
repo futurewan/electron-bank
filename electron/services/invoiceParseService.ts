@@ -1,12 +1,15 @@
 /**
  * 发票 PDF 解析服务
- * 从 PDF 发票中提取结构化信息（支持元数据提取 + 文字层正则提取）
- * 并支持批量解析和导出为 Excel
+ * 从 PDF 发票中提取结构化信息（使用 Python pdfplumber 脚本 + 实时进度）
+ * 并支持批量解析和导出为 Excel（Python pandas）
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import * as XLSX from 'xlsx'
-import { PDFParse, VerbosityLevel } from 'pdf-parse'
+import { eq, and, or, isNull, sql } from 'drizzle-orm'
+import { getDatabase } from '../database/client'
+import { invoices } from '../database/schema'
+import { pythonService } from './pythonService'
+import { aiService } from './aiService'
 
 // ============================================
 // 类型定义
@@ -14,41 +17,26 @@ import { PDFParse, VerbosityLevel } from 'pdf-parse'
 
 /**
  * 单张发票的结构化信息
+ * （需与 models.py 中的 InvoiceInfo 保持一致）
  */
 export interface InvoiceInfo {
-    /** 源文件路径 */
     filePath: string
-    /** 源文件名 */
     fileName: string
-    /** 发票代码 */
     invoiceCode: string | null
-    /** 发票号码 */
     invoiceNumber: string | null
-    /** 开票日期 */
     invoiceDate: string | null
-    /** 购买方名称 */
     buyerName: string | null
-    /** 购买方税号 */
     buyerTaxId: string | null
-    /** 销售方名称 */
     sellerName: string | null
-    /** 销售方税号 */
     sellerTaxId: string | null
-    /** 不含税金额 */
     amount: number | null
-    /** 税额 */
     taxAmount: number | null
-    /** 价税合计 */
     totalAmount: number | null
-    /** 税率 */
     taxRate: string | null
-    /** 发票类型 */
     invoiceType: string | null
-    /** 项目名称/商品名称 */
     itemName: string | null
-    /** 价税合计大写 */
     totalAmountChinese: string | null
-    /** 解析来源 (metadata / textlayer / both) */
+    // 解析来源 (metadata / textlayer / both) - 这里 Python 端返回的是 snake_case，需要注意映射
     parseSource: string
 }
 
@@ -58,7 +46,7 @@ export interface InvoiceInfo {
 export interface DuplicateRecord {
     fileName: string
     invoiceNumber: string | null
-    reason: string  // '批次内重复' | '跨批次重复'
+    reason: string
 }
 
 /**
@@ -75,381 +63,167 @@ export interface BatchParseResult {
     failCount: number
 }
 
+// 内部：Python 返回的数据结构（snake_case）
+interface PythonInvoiceInfo {
+    file_path: string
+    file_name: string
+    invoice_code: string | null
+    invoice_number: string | null
+    invoice_date: string | null
+    buyer_name: string | null
+    buyer_tax_id: string | null
+    seller_name: string | null
+    seller_tax_id: string | null
+    amount: number | null
+    tax_amount: number | null
+    total_amount: number | null
+    tax_rate: string | null
+    invoice_type: string | null
+    item_name: string | null
+    total_amount_chinese: string | null
+    parse_source: string
+}
+
+interface PythonBatchResult {
+    success: boolean
+    invoices: PythonInvoiceInfo[]
+    errors: Array<{ file_path: string; error: string }>
+    duplicates: Array<{ file_name: string; invoice_number: string | null; reason: string }>
+    total_files: number
+    success_count: number
+    duplicate_count: number
+    fail_count: number
+}
+
 // ============================================
 // PDF 解析核心逻辑
 // ============================================
 
 /**
- * 解析单个 PDF 发票文件
- */
-export async function parseSingleInvoicePdf(filePath: string): Promise<{
-    success: boolean
-    invoice?: InvoiceInfo
-    error?: string
-}> {
-    try {
-        if (!fs.existsSync(filePath)) {
-            return { success: false, error: `文件不存在: ${filePath}` }
-        }
-
-        const ext = path.extname(filePath).toLowerCase()
-        if (ext !== '.pdf') {
-            return { success: false, error: `不支持的文件格式: ${ext}，仅支持 PDF` }
-        }
-
-        const dataBuffer = fs.readFileSync(filePath)
-        const data = new Uint8Array(dataBuffer)
-
-        const parser = new PDFParse({
-            data,
-            verbosity: VerbosityLevel.ERRORS,
-        })
-
-        // load() 在类型定义中标记为 private，但运行时是唯一的初始化方式
-        await (parser as any).load()
-
-        const invoice: InvoiceInfo = {
-            filePath,
-            fileName: path.basename(filePath),
-            invoiceCode: null,
-            invoiceNumber: null,
-            invoiceDate: null,
-            buyerName: null,
-            buyerTaxId: null,
-            sellerName: null,
-            sellerTaxId: null,
-            amount: null,
-            taxAmount: null,
-            totalAmount: null,
-            taxRate: null,
-            invoiceType: null,
-            itemName: null,
-            totalAmountChinese: null,
-            parseSource: 'none',
-        }
-
-        let hasMetadata = false
-        let hasTextLayer = false
-
-        // ========== 1. 从 PDF 元数据提取 ==========
-        try {
-            const info = await parser.getInfo()
-            const custom = (info as any).info?.Custom || {}
-
-            if (Object.keys(custom).length > 0) {
-                hasMetadata = true
-
-                // 常见的元数据字段名映射
-                invoice.invoiceNumber = custom.InvoiceNumber || custom.invoiceNumber || custom.InvoiceNo || null
-                invoice.sellerTaxId = custom.SellerIdNum || custom.SellerTaxId || custom.sellerIdNum || null
-
-                // 开票日期
-                const issueTime = custom.IssueTime || custom.issueTime || custom.InvoiceDate || null
-                if (issueTime) {
-                    invoice.invoiceDate = normalizeDate(issueTime)
-                }
-
-                // 金额
-                const amountStr = custom.TotalAmWithoutTax || custom.totalAmountWithoutTax || null
-                if (amountStr) invoice.amount = parseFloat(amountStr)
-
-                const totalStr = custom['TotalTax-includedAmount'] || custom.TotalAmount || custom.totalAmount || null
-                if (totalStr) invoice.totalAmount = parseFloat(totalStr)
-
-                const taxStr = custom.TotalTaxAm || custom.TotalTax || custom.totalTax || null
-                if (taxStr) invoice.taxAmount = parseFloat(taxStr)
-            }
-        } catch (e) {
-            console.warn('[InvoiceParse] 元数据提取失败:', e)
-        }
-
-        // ========== 2. 使用 getText() 公开 API 提取文字层 ==========
-        try {
-            const textResult = await parser.getText() as any
-            const fullText: string = textResult?.text || ''
-
-            if (fullText && fullText.trim().length > 0) {
-                hasTextLayer = true
-                extractFieldsFromText(fullText, invoice)
-            }
-        } catch (e) {
-            console.warn('[InvoiceParse] 文字层提取失败:', e)
-        }
-
-        // 设置解析来源
-        if (hasMetadata && hasTextLayer) {
-            invoice.parseSource = 'both'
-        } else if (hasMetadata) {
-            invoice.parseSource = 'metadata'
-        } else if (hasTextLayer) {
-            invoice.parseSource = 'textlayer'
-        }
-
-        await parser.destroy()
-
-        return { success: true, invoice }
-    } catch (error) {
-        console.error('[InvoiceParse] 解析失败:', error)
-        return { success: false, error: String(error) }
-    }
-}
-
-/**
- * 从全文文本中用正则提取发票各字段
- */
-function extractFieldsFromText(fullText: string, invoice: InvoiceInfo): void {
-    const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean)
-
-    // ---- 发票类型 ----
-    const typeMatch = fullText.match(/(电子发票\([^)]+\)|增值税普通发票|增值税专用发票|全电发票)/)
-    if (typeMatch) invoice.invoiceType = typeMatch[1]
-
-    // ---- 发票代码（10-12位纯数字，通常在行首或"发票代码"后）----
-    if (!invoice.invoiceCode) {
-        const codeMatch = fullText.match(/发票代码[：:\s]*(\d{10,12})/)
-        if (codeMatch) invoice.invoiceCode = codeMatch[1]
-    }
-
-    // ---- 发票号码（从文字层可能更精确）----
-    if (!invoice.invoiceNumber) {
-        const numMatch = fullText.match(/发票号码[：:\s]*(\d{8,20})/)
-        if (numMatch) invoice.invoiceNumber = numMatch[1]
-    }
-    // 如果仍然没有，尝试匹配独立行中的长数字串（可能是发票号码）
-    if (!invoice.invoiceNumber) {
-        for (const line of lines) {
-            if (/^\d{15,20}$/.test(line)) {
-                invoice.invoiceNumber = line
-                break
-            }
-        }
-    }
-
-    // ---- 开票日期 ----
-    if (!invoice.invoiceDate) {
-        const dateMatch = fullText.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/)
-        if (dateMatch) {
-            invoice.invoiceDate = `${dateMatch[1]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[3].padStart(2, '0')}`
-        }
-    }
-
-    // ---- 购买方/销售方名称 ----
-    // 找包含 "公司" "企业" 等关键词的行
-    const companyLines = lines.filter(line =>
-        /[\u4e00-\u9fa5]{2,}(公司|企业|集团|厂|研究所|研究院|事务所|中心|学校|大学|学院|医院|银行)/.test(line)
-    )
-
-    if (companyLines.length >= 2 && !invoice.buyerName && !invoice.sellerName) {
-        invoice.buyerName = companyLines[0]
-        invoice.sellerName = companyLines[1]
-    } else if (companyLines.length === 1 && !invoice.sellerName) {
-        invoice.sellerName = companyLines[0]
-    }
-
-    // ---- 税号（15-20位数字+大写字母）----
-    const taxIdPattern = /[0-9A-Z]{15,20}/g
-    const allTaxIds = fullText.match(taxIdPattern) || []
-    // 过滤掉已知的发票号码
-    const taxIds = allTaxIds.filter(id =>
-        id !== invoice.invoiceNumber &&
-        id !== invoice.invoiceCode &&
-        /[A-Z]/.test(id) // 税号通常含有字母
-    )
-
-    if (taxIds.length >= 2) {
-        if (!invoice.buyerTaxId) invoice.buyerTaxId = taxIds[0]
-        if (!invoice.sellerTaxId) invoice.sellerTaxId = taxIds[1]
-    } else if (taxIds.length === 1 && !invoice.sellerTaxId) {
-        invoice.sellerTaxId = taxIds[0]
-    }
-
-    // ---- 项目/商品名称 ----
-    // 在含有金额的行中找中文文本部分
-    for (const line of lines) {
-        // 格式: "项目名称\t金额\t税率\t税额"
-        if (/\t/.test(line) && /[\d.]+/.test(line) && /[\u4e00-\u9fa5]/.test(line)) {
-            const parts = line.split('\t').map(p => p.trim())
-            const namePart = parts.find(p => /[\u4e00-\u9fa5]{2,}/.test(p) && !/[¥￥%]/.test(p))
-            if (namePart && !invoice.itemName) {
-                invoice.itemName = namePart
-            }
-        }
-    }
-    // 退而求其次：不含公司名也不含常见标签的中文行
-    if (!invoice.itemName) {
-        const labelPatterns = /^(名称|税号|地址|电话|开户行|账号|备注|收款人|复核|开票人|合计|发票|机器编号|校验码)/
-        for (const line of lines) {
-            if (
-                /[\u4e00-\u9fa5]{2,}/.test(line) &&
-                !labelPatterns.test(line) &&
-                !/(公司|企业|集团|元.*分)/.test(line) &&
-                !/(年.*月.*日)/.test(line) &&
-                !/^[¥￥]/.test(line) &&
-                line.length >= 2 && line.length <= 30
-            ) {
-                invoice.itemName = line
-                break
-            }
-        }
-    }
-
-    // ---- 金额、税率、税额 ----
-    // 格式通常是: "商品名 \t 金额 \t 税率 \t 税额"
-    for (const line of lines) {
-        const tabParts = line.split('\t').map(p => p.trim())
-        if (tabParts.length >= 3) {
-            const nums = tabParts.filter(p => /^[\d,.]+$/.test(p)).map(p => parseFloat(p.replace(/,/g, '')))
-            const rateStr = tabParts.find(p => /\d+%/.test(p))
-
-            if (nums.length >= 2) {
-                if (invoice.amount === null) invoice.amount = nums[0]
-                if (invoice.taxAmount === null) invoice.taxAmount = nums[nums.length - 1]
-            }
-            if (rateStr && !invoice.taxRate) {
-                invoice.taxRate = rateStr
-            }
-        }
-    }
-
-    // ---- ¥ 开头的金额 ----
-    const yenMatches = fullText.match(/[¥￥]([\d,.]+)/g)
-    if (yenMatches && yenMatches.length >= 2) {
-        const amounts = yenMatches.map(m => parseFloat(m.replace(/[¥￥,]/g, ''))).filter(n => !isNaN(n))
-        if (invoice.amount === null && amounts[0]) invoice.amount = amounts[0]
-        if (invoice.taxAmount === null && amounts[1]) invoice.taxAmount = amounts[1]
-    }
-
-    // ---- 价税合计大写 ----
-    const chineseAmountMatch = fullText.match(/([零壹贰叁肆伍陆柒捌玖拾佰仟万亿元角分整]{4,})/)
-    if (chineseAmountMatch) {
-        invoice.totalAmountChinese = chineseAmountMatch[1]
-    }
-
-    // ---- 价税合计小写 ----
-    if (invoice.totalAmount === null) {
-        // 先尝试从金额+税额计算
-        if (invoice.amount !== null && invoice.taxAmount !== null) {
-            invoice.totalAmount = Math.round((invoice.amount + invoice.taxAmount) * 100) / 100
-        } else {
-            // 查找独立行中的纯数字（可能是价税合计）
-            for (const line of lines) {
-                if (/^\d+\.\d{2}$/.test(line.trim())) {
-                    const num = parseFloat(line.trim())
-                    if (num > 0 && (invoice.totalAmount === null || num > invoice.totalAmount)) {
-                        invoice.totalAmount = num
-                    }
-                }
-            }
-        }
-    }
-
-    // ---- 税率（如果还没提取到）----
-    if (!invoice.taxRate) {
-        const taxRateMatch = fullText.match(/(\d{1,2})%/)
-        if (taxRateMatch) invoice.taxRate = taxRateMatch[1] + '%'
-    }
-}
-
-/**
- * 生成去重键：invoiceNumber 优先，fallback 到 sellerName+amount+invoiceDate
- */
-function getDeduplicationKey(invoice: InvoiceInfo): string {
-    if (invoice.invoiceNumber) {
-        return `num:${invoice.invoiceNumber}`
-    }
-    // 组合键兜底
-    const seller = (invoice.sellerName || '').trim()
-    const amount = String(invoice.totalAmount ?? invoice.amount ?? '')
-    const date = (invoice.invoiceDate || '').trim()
-    return `combo:${seller}|${amount}|${date}`
-}
-
-/**
  * 批量解析文件夹中的 PDF 发票（含批次内去重）
+ * 调用 Python 脚本处理
  */
 export async function batchParsePdfInvoices(
     folderPath: string,
     onProgress?: (current: number, total: number, fileName: string) => void,
 ): Promise<BatchParseResult> {
-    const result: BatchParseResult = {
-        success: true,
-        invoices: [],
-        errors: [],
-        duplicates: [],
-        totalFiles: 0,
-        successCount: 0,
-        duplicateCount: 0,
-        failCount: 0,
+
+    // 1. Check Python environment
+    const envStatus = await pythonService.checkEnvironment();
+    if (!envStatus.available) {
+        return {
+            success: false,
+            invoices: [],
+            errors: [{ filePath: folderPath, error: `Python 环境检查失败: ${envStatus.error || '缺少依赖'}` }],
+            duplicates: [],
+            totalFiles: 0,
+            successCount: 0,
+            duplicateCount: 0,
+            failCount: 0,
+        }
     }
 
-    if (!fs.existsSync(folderPath)) {
-        return { ...result, success: false, errors: [{ filePath: folderPath, error: '文件夹不存在' }] }
-    }
+    try {
+        // 2. Run Python script
+        // Note: Python script emits progress events to stdout if onProgress is provided to runScript
+        // The final line will be the result JSON
 
-    // 扫描所有 PDF 文件
-    const files = fs.readdirSync(folderPath).filter(f => {
-        const ext = path.extname(f).toLowerCase()
-        return ext === '.pdf' && !f.startsWith('.') // 排除隐藏文件
-    })
+        let finalResult: PythonBatchResult | null = null;
 
-    result.totalFiles = files.length
+        console.log('[InvoiceParse] Starting Python script for folder:', folderPath);
 
-    if (files.length === 0) {
-        return { ...result, success: false, errors: [{ filePath: folderPath, error: '文件夹中没有 PDF 文件' }] }
-    }
-
-    // 用于批次内去重的 Set
-    const seenKeys = new Set<string>()
-    // 暂存所有成功解析的发票（去重前）
-    const parsedInvoices: InvoiceInfo[] = []
-
-    // 逐个解析
-    for (let i = 0; i < files.length; i++) {
-        const fileName = files[i]
-        const filePath = path.join(folderPath, fileName)
-
-        onProgress?.(i + 1, files.length, fileName)
-
-        try {
-            const parseResult = await parseSingleInvoicePdf(filePath)
-
-            if (parseResult.success && parseResult.invoice) {
-                parsedInvoices.push(parseResult.invoice)
+        const output = await pythonService.runScript('main.py', ['parse', '--folder', folderPath], (event) => {
+            if (event.type === 'progress') {
+                onProgress?.(event.current, event.total, event.file);
+            } else if (event.type === 'result') {
+                // Intercept result event if emited as event
+                console.log('[InvoiceParse] Received result event from Python, invoices:', event.data?.invoices?.length ?? 'N/A');
+                finalResult = event.data;
             } else {
-                result.errors.push({ filePath, error: parseResult.error || '解析失败' })
-                result.failCount++
+                console.log('[InvoiceParse] Unknown event type:', event.type, JSON.stringify(event).slice(0, 200));
             }
-        } catch (error) {
-            result.errors.push({ filePath, error: String(error) })
-            result.failCount++
+        });
+
+        console.log('[InvoiceParse] Python script finished. finalResult set:', !!finalResult, ', stdout buffer length:', output?.length ?? 0);
+
+        // If result wasn't captured in event stream (e.g. if script just printed it at end)
+        // Check stdout capture (which runScript returns)
+        // Our main.py prints json at the end.
+        if (!finalResult) {
+            console.log('[InvoiceParse] Trying to parse stdout buffer:', output?.slice(0, 500));
+            try {
+                const json = JSON.parse(output);
+                if (json.type === 'result') {
+                    finalResult = json.data;
+                } else if (json.invoices) {
+                    // Maybe it printed raw result?
+                    finalResult = json;
+                }
+            } catch (e) {
+                console.error("[InvoiceParse] Failed to parse Python output as JSON:", output?.slice(0, 500));
+            }
+        }
+
+        if (!finalResult) {
+            throw new Error("Failed to get result from Python script. Raw output: " + (output || '(empty)').slice(0, 200));
+        }
+
+        console.log('[InvoiceParse] Parse complete. Total:', finalResult.total_files, 'Success:', finalResult.success_count, 'Fail:', finalResult.fail_count);
+
+        // 3. Convert Python snake_case to TypeScript camelCase
+        return mapPythonResultToTs(finalResult);
+
+    } catch (error: any) {
+        console.error("[InvoiceParse] Python parse failed:", error);
+        return {
+            success: false,
+            invoices: [],
+            errors: [{ filePath: folderPath, error: error.message }],
+            duplicates: [],
+            totalFiles: 0,
+            successCount: 0,
+            duplicateCount: 0,
+            failCount: 1,
         }
     }
+}
 
-    // 批次内去重
-    for (const invoice of parsedInvoices) {
-        const dedupKey = getDeduplicationKey(invoice)
-
-        if (seenKeys.has(dedupKey)) {
-            // 重复，跳过
-            const fileName = invoice.filePath
-                ? path.basename(invoice.filePath)
-                : invoice.invoiceNumber || '未知文件'
-            result.duplicates.push({
-                fileName,
-                invoiceNumber: invoice.invoiceNumber || null,
-                reason: '批次内重复',
-            })
-            result.duplicateCount++
-        } else {
-            seenKeys.add(dedupKey)
-            result.invoices.push(invoice)
-            result.successCount++
-        }
+function mapPythonResultToTs(pyResult: PythonBatchResult): BatchParseResult {
+    return {
+        success: pyResult.success,
+        totalFiles: pyResult.total_files,
+        successCount: pyResult.success_count,
+        duplicateCount: pyResult.duplicate_count,
+        failCount: pyResult.fail_count,
+        invoices: pyResult.invoices.map(inv => ({
+            filePath: inv.file_path,
+            fileName: inv.file_name,
+            invoiceCode: inv.invoice_code,
+            invoiceNumber: inv.invoice_number,
+            invoiceDate: inv.invoice_date,
+            buyerName: inv.buyer_name,
+            buyerTaxId: inv.buyer_tax_id,
+            sellerName: inv.seller_name,
+            sellerTaxId: inv.seller_tax_id,
+            amount: inv.amount,
+            taxAmount: inv.tax_amount,
+            totalAmount: inv.total_amount,
+            taxRate: inv.tax_rate,
+            invoiceType: inv.invoice_type,
+            itemName: inv.item_name,
+            totalAmountChinese: inv.total_amount_chinese,
+            parseSource: inv.parse_source
+        })),
+        errors: pyResult.errors.map(e => ({
+            filePath: e.file_path,
+            error: e.error
+        })),
+        duplicates: pyResult.duplicates.map(d => ({
+            fileName: d.file_name,
+            invoiceNumber: d.invoice_number,
+            reason: d.reason
+        }))
     }
-
-    result.success = result.successCount > 0
-
-    return result
 }
 
 // ============================================
@@ -459,72 +233,99 @@ export async function batchParsePdfInvoices(
 /**
  * 将发票数据导出为 Excel 文件
  */
-export function exportInvoicesToExcel(
+export async function exportInvoicesToExcel(
     invoices: InvoiceInfo[],
     outputPath: string,
-): { success: boolean; filePath?: string; error?: string } {
+): Promise<{ success: boolean; filePath?: string; error?: string }> {
+    // 1. Check Python environment
+    const envStatus = await pythonService.checkEnvironment();
+    if (!envStatus.available) {
+        return { success: false, error: `Python 环境检查失败: ${envStatus.error}` };
+    }
+
     try {
-        // 转换为 Excel 友好的格式
-        const excelData = invoices.map((inv, index) => ({
-            '序号': index + 1,
-            '发票号码': inv.invoiceNumber || '',
-            '发票代码': inv.invoiceCode || '',
-            '开票日期': inv.invoiceDate || '',
-            '发票类型': inv.invoiceType || '',
-            '购买方': inv.buyerName || '',
-            '购买方税号': inv.buyerTaxId || '',
-            '销售方名称': inv.sellerName || '',
-            '销售方税号': inv.sellerTaxId || '',
-            '项目名称': inv.itemName || '',
-            '金额': inv.amount ?? '',
-            '税率': inv.taxRate || '',
-            '税额': inv.taxAmount ?? '',
-            '价税合计': inv.totalAmount ?? '',
-            '价税合计(大写)': inv.totalAmountChinese || '',
-            '源文件': inv.fileName,
-        }))
+        // Convert TS objects to Python-friendly dicts (mostly snake_case)
+        const pythonInvoices = invoices.map(inv => ({
+            file_path: inv.filePath,
+            file_name: inv.fileName,
+            invoice_code: inv.invoiceCode,
+            invoice_number: inv.invoiceNumber,
+            invoice_date: inv.invoiceDate,
+            buyer_name: inv.buyerName,
+            buyer_tax_id: inv.buyerTaxId,
+            seller_name: inv.sellerName,
+            seller_tax_id: inv.sellerTaxId,
+            amount: inv.amount,
+            tax_amount: inv.taxAmount,
+            total_amount: inv.totalAmount,
+            tax_rate: inv.taxRate,
+            invoice_type: inv.invoiceType,
+            item_name: inv.itemName,
+            total_amount_chinese: inv.totalAmountChinese,
+            parse_source: inv.parseSource
+        }));
 
-        const ws = XLSX.utils.json_to_sheet(excelData)
+        const { spawn } = await import('node:child_process');
+        const { app } = await import('electron');
 
-        // 设置列宽
-        ws['!cols'] = [
-            { wch: 5 },   // 序号
-            { wch: 22 },  // 发票号码
-            { wch: 14 },  // 发票代码
-            { wch: 12 },  // 开票日期
-            { wch: 22 },  // 发票类型
-            { wch: 28 },  // 购买方
-            { wch: 22 },  // 购买方税号
-            { wch: 28 },  // 销售方
-            { wch: 22 },  // 销售方税号
-            { wch: 20 },  // 项目名称
-            { wch: 14 },  // 金额
-            { wch: 8 },   // 税率
-            { wch: 12 },  // 税额
-            { wch: 14 },  // 价税合计
-            { wch: 26 },  // 价税合计大写
-            { wch: 22 },  // 源文件
-        ]
-
-        const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb, ws, '发票清单')
-
-        // 确保输出目录存在
-        const outputDir = path.dirname(outputPath)
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true })
+        // Resolve Python path - check venv first, then fallback to system python3
+        let scriptDir: string;
+        if (app.isPackaged) {
+            scriptDir = path.join(globalThis.process.resourcesPath, 'python');
+        } else {
+            scriptDir = path.join(globalThis.process.cwd(), 'electron/python');
         }
 
-        // 使用 fs.writeFileSync 直接写入 buffer，避免 xlsx 库在 Electron 环境下的路径判断问题
-        const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
-        fs.writeFileSync(outputPath, buffer)
+        // Use venv Python if available
+        const venvPython = path.join(scriptDir, '.venv/bin/python');
+        const pyPath = fs.existsSync(venvPython) ? venvPython : 'python3';
 
-        console.log(`[InvoiceParse] Excel 导出成功: ${outputPath}，共 ${invoices.length} 条记录`)
+        const scriptFile = path.join(scriptDir, 'main.py');
+        if (!fs.existsSync(scriptFile)) {
+            return { success: false, error: `Python script not found at ${scriptFile}` };
+        }
 
-        return { success: true, filePath: outputPath }
-    } catch (error) {
-        console.error('[InvoiceParse] Excel 导出失败:', error)
-        return { success: false, error: String(error) }
+        console.log(`[ExportExcel] Running: ${pyPath} ${scriptFile} export --output ${outputPath}`);
+
+        return new Promise((resolve, _reject) => {
+            const child = spawn(pyPath, [scriptFile, 'export', '--output', outputPath]);
+
+            let stdout = '';
+            let stderr = '';
+
+            child.stdout.on('data', d => stdout += d.toString());
+            child.stderr.on('data', d => stderr += d.toString());
+
+            child.on('close', code => {
+                if (stderr) {
+                    console.warn('[ExportExcel] stderr:', stderr.slice(0, 500));
+                }
+                if (code !== 0) {
+                    resolve({ success: false, error: stderr || `Exited with code ${code}` });
+                } else {
+                    try {
+                        const res = JSON.parse(stdout);
+                        if (res.success) resolve({ success: true, filePath: res.file_path });
+                        else resolve({ success: false, error: res.message });
+                    } catch (e) {
+                        resolve({ success: false, error: "Invalid JSON response from Python" });
+                    }
+                }
+            });
+
+            child.on('error', (err) => {
+                console.error('[ExportExcel] Spawn error:', err);
+                resolve({ success: false, error: err.message });
+            });
+
+            // Write invoice data to stdin
+            child.stdin.write(JSON.stringify(pythonInvoices));
+            child.stdin.end();
+        });
+
+    } catch (error: any) {
+        console.error('[ExportExcel] Error:', error);
+        return { success: false, error: error.message };
     }
 }
 
@@ -563,27 +364,128 @@ export function scanPdfFiles(folderPath: string): {
     }
 }
 
-// ============================================
-// 辅助函数
-// ============================================
-
 /**
- * 规范化日期字符串
+ * AI 修复损坏的发票
+ * 针对金额为0或销售方未知的发票，重新读取 PDF 文本并使用 AI 提取
  */
-function normalizeDate(dateStr: string): string | null {
-    if (!dateStr) return null
+export async function repairBrokenInvoices(
+    batchId: string,
+    onProgress?: (current: number, total: number, message: string) => void
+): Promise<{ repairedCount: number, failedCount: number }> {
+    const db = getDatabase();
 
-    // "2026年01月26日" → "2026-01-26"
-    const match = dateStr.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/)
-    if (match) {
-        return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
+    // 1. Identify broken invoices
+    // Criteria: amount = 0 OR sellerName is empty/unknown
+    // And file path exists
+    const brokenInvoices = await db.select()
+        .from(invoices)
+        .where(and(
+            eq(invoices.batchId, batchId),
+            or(
+                eq(invoices.amount, 0),
+                isNull(invoices.amount),
+                eq(invoices.sellerName, ''),
+                eq(invoices.sellerName, '未知销售方'),
+                eq(invoices.sellerName, 'Unknown')
+            )
+        ));
+
+    if (brokenInvoices.length === 0) {
+        return { repairedCount: 0, failedCount: 0 };
     }
 
-    // "2026-01-26" 或 "2026/01/26"
-    const match2 = dateStr.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/)
-    if (match2) {
-        return `${match2[1]}-${match2[2].padStart(2, '0')}-${match2[3].padStart(2, '0')}`
+    console.log(`[AI Repair] Found ${brokenInvoices.length} broken invoices for batch ${batchId}`);
+
+    let repaired = 0;
+    let failed = 0;
+
+    for (let i = 0; i < brokenInvoices.length; i++) {
+        const inv = brokenInvoices[i];
+        onProgress?.(i + 1, brokenInvoices.length, `正在修复: ${path.basename(inv.sourceFilePath || '未知文件')}`);
+
+        if (!inv.sourceFilePath || !fs.existsSync(inv.sourceFilePath)) {
+            console.warn(`[AI Repair] File not found for invoice ${inv.id}: ${inv.sourceFilePath}`);
+            failed++;
+            continue;
+        }
+
+        try {
+            // 2. Extract raw text
+            const rawText = await pythonService.extractText(inv.sourceFilePath);
+            if (!rawText || rawText.length < 50) {
+                console.warn(`[AI Repair] insufficient text extracted for ${inv.sourceFilePath}`);
+                failed++;
+                continue;
+            }
+
+            // 3. Construct Prompt
+            const prompt = `
+            You are an expert accountant. Extract the following fields from the invoice text below into JSON format:
+            - invoiceCode (string)
+            - invoiceNumber (string)
+            - date (YYYY-MM-DD)
+            - buyerName (string)
+            - sellerName (string)
+            - amount (number, price excluding tax)
+            - taxAmount (number, tax amount)
+            - totalAmount (number, price including tax)
+            - itemName (string, main product/service name)
+
+            Constraint: 
+            - If field is missing, use null.
+            - amount must be positive number.
+            - sellerName should be the company name.
+            
+            Invoice Text:
+            ${rawText.slice(0, 3000)}
+            `;
+
+            // 4. Call AI
+            const result = await aiService.getJSON<any>(
+                "Extract structured invoice data from text.",
+                prompt,
+                0.1 // Low temperature for extraction
+            );
+
+            // 5. Validate
+            // Check if we got either amount or totalAmount > 0
+            const validAmount = (result.amount > 0) || (result.totalAmount > 0);
+
+            if (validAmount && result.sellerName) {
+                // Determine the 'amount' to store in DB (should be total)
+                const finalAmount = result.totalAmount || (result.amount + (result.taxAmount || 0));
+
+                // Update DB
+                await db.update(invoices)
+                    .set({
+                        amount: finalAmount, // Store Total Amount
+                        sellerName: result.sellerName,
+                        invoiceCode: result.invoiceCode || inv.invoiceCode,
+                        invoiceNumber: result.invoiceNumber || inv.invoiceNumber,
+                        invoiceDate: result.date ? new Date(result.date) : inv.invoiceDate,
+
+                        // Optional fields
+                        taxAmount: result.taxAmount || inv.taxAmount,
+                        itemName: result.itemName || inv.itemName,
+
+                        parseSource: 'ai_repair',
+                        status: 'pending'
+                    })
+                    .where(eq(invoices.id, inv.id));
+
+                repaired++;
+                console.log(`[AI Repair] Repaired invoice ${inv.id}: ${finalAmount} / ${result.sellerName}`);
+            } else {
+                console.warn(`[AI Repair] AI returned invalid data for ${inv.id}`, result);
+                failed++;
+            }
+
+        } catch (error) {
+            console.error(`[AI Repair] Failed to repair invoice ${inv.id}:`, error);
+            failed++;
+        }
     }
 
-    return dateStr
+    return { repairedCount: repaired, failedCount: failed };
 }
+

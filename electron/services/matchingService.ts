@@ -6,14 +6,14 @@ import { and, eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getDatabase } from '../database/client'
 import {
-    BankTransaction,
-    bankTransactions,
-    Invoice,
-    invoices,
-    matchResults,
-    NewMatchResult,
-    payerMappings,
-    reconciliationBatches
+  BankTransaction,
+  bankTransactions,
+  Invoice,
+  invoices,
+  matchResults,
+  NewMatchResult,
+  payerMappings,
+  reconciliationBatches
 } from '../database/schema'
 import { normalizeName } from './parseService'
 import { isStopped } from './taskService'
@@ -85,7 +85,7 @@ export async function executeRuleMatching(
 ): Promise<MatchingStats> {
   const startTime = Date.now()
   const db = getDatabase()
-  
+
   // 获取待匹配数据
   const bankTxns = await db.select()
     .from(bankTransactions)
@@ -93,28 +93,28 @@ export async function executeRuleMatching(
       eq(bankTransactions.batchId, batchId),
       eq(bankTransactions.status, 'pending')
     ))
-  
+
   const invoiceList = await db.select()
     .from(invoices)
     .where(and(
       eq(invoices.batchId, batchId),
       eq(invoices.status, 'pending')
     ))
-  
+
   // 获取付款人对应关系
   const mappings = await db.select().from(payerMappings)
-  
+
   // 匹配结果收集
   const allMatches: MatchRecord[] = []
   const matchedBankIds = new Set<string>()
   const matchedInvoiceIds = new Set<string>()
-  
+
   let perfectCount = 0
   let toleranceCount = 0
   let proxyCount = 0
-  
+
   const totalTasks = bankTxns.length
-  
+
   // ============================================
   // Level 1: 完美匹配
   // ============================================
@@ -125,7 +125,7 @@ export async function executeRuleMatching(
     matchedCount: 0,
     message: '开始 Level 1: 完美匹配...',
   })
-  
+
   for (let i = 0; i < bankTxns.length; i++) {
     // 每 100 条记录让位一次事件循环，防止阻塞主线程导致无法接收停止指令
     if (i % 100 === 0) {
@@ -134,16 +134,27 @@ export async function executeRuleMatching(
     if (isStopped(batchId)) throw new Error('任务被用户停止')
     const bank = bankTxns[i]
     if (matchedBankIds.has(bank.id)) continue
-    
+
     const normalizedBankName = normalizeName(bank.payerName)
-    
-    // 查找完美匹配：金额相等 + 户名相等
-    const matchedInvoice = invoiceList.find(inv => 
-      !matchedInvoiceIds.has(inv.id) &&
-      bank.amount === inv.amount &&
-      normalizeName(inv.sellerName) === normalizedBankName
-    )
-    
+
+    // 查找完美匹配：金额相等 + 户名相等（匹配销方或购方）
+    const matchedInvoice = invoiceList.find(inv => {
+      if (matchedInvoiceIds.has(inv.id)) return false
+      if (bank.amount !== inv.amount) return false
+
+      const normalizedSellerName = normalizeName(inv.sellerName)
+      const normalizedBuyerName = normalizeName(inv.buyerName)
+      const remark = bank.remark || ''
+
+      // 特殊规则：货款收入匹配购方
+      if (remark.includes('货款收入')) {
+        return normalizedBuyerName === normalizedBankName
+      }
+
+      // 通用匹配：只要对方户名在发票的销方或购方中出现即可
+      return normalizedSellerName === normalizedBankName || normalizedBuyerName === normalizedBankName
+    })
+
     if (matchedInvoice) {
       allMatches.push({
         bankId: bank.id,
@@ -157,7 +168,7 @@ export async function executeRuleMatching(
       matchedInvoiceIds.add(matchedInvoice.id)
       perfectCount++
     }
-    
+
     if (i % 100 === 0) {
       onProgress?.({
         level: 1,
@@ -168,9 +179,9 @@ export async function executeRuleMatching(
       })
     }
   }
-  
+
   console.log(`[Matching] Level 1 完美匹配完成: ${perfectCount} 条`)
-  
+
   // ============================================
   // Level 2: 容差匹配
   // ============================================
@@ -181,7 +192,7 @@ export async function executeRuleMatching(
     matchedCount: perfectCount,
     message: '开始 Level 2: 容差匹配...',
   })
-  
+
   let level2Processed = 0
   for (let i = 0; i < bankTxns.length; i++) {
     if (i % 100 === 0) {
@@ -190,19 +201,31 @@ export async function executeRuleMatching(
     if (isStopped(batchId)) throw new Error('任务被用户停止')
     const bank = bankTxns[i]
     level2Processed++
-    
+
     const normalizedBankName = normalizeName(bank.payerName)
-    
+
     // 查找容差匹配：户名相等 + 金额差 ≤ 20
     const matchedInvoice = invoiceList.find(inv => {
       if (matchedInvoiceIds.has(inv.id)) return false
-      if (normalizeName(inv.sellerName) !== normalizedBankName) return false
-      
+
+      const normalizedSellerName = normalizeName(inv.sellerName)
+      const normalizedBuyerName = normalizeName(inv.buyerName)
+      const remark = bank.remark || ''
+
+      let isNameMatch = false
+      if (remark.includes('货款收入')) {
+        isNameMatch = (normalizedBuyerName === normalizedBankName)
+      } else {
+        isNameMatch = (normalizedSellerName === normalizedBankName || normalizedBuyerName === normalizedBankName)
+      }
+
+      if (!isNameMatch) return false
+
       const diff = inv.amount - bank.amount
       // 只匹配发票金额 > 银行金额的情况（手续费被扣减）
       return diff > 0 && diff <= TOLERANCE_AMOUNT
     })
-    
+
     if (matchedInvoice) {
       const diff = matchedInvoice.amount - bank.amount
       allMatches.push({
@@ -217,7 +240,7 @@ export async function executeRuleMatching(
       matchedInvoiceIds.add(matchedInvoice.id)
       toleranceCount++
     }
-    
+
     if (level2Processed % 100 === 0) {
       onProgress?.({
         level: 2,
@@ -228,9 +251,9 @@ export async function executeRuleMatching(
       })
     }
   }
-  
+
   console.log(`[Matching] Level 2 容差匹配完成: ${toleranceCount} 条`)
-  
+
   // ============================================
   // Level 3: 关系映射匹配
   // ============================================
@@ -241,7 +264,7 @@ export async function executeRuleMatching(
     matchedCount: perfectCount + toleranceCount,
     message: '开始 Level 3: 关系映射匹配...',
   })
-  
+
   // 构建关系映射索引（个人 -> 公司列表）
   const personToCompanies = new Map<string, string[]>()
   for (const mapping of mappings) {
@@ -251,7 +274,7 @@ export async function executeRuleMatching(
     }
     personToCompanies.get(person)!.push(normalizeName(mapping.companyName))
   }
-  
+
   let level3Processed = 0
   for (let i = 0; i < bankTxns.length; i++) {
     if (i % 100 === 0) {
@@ -260,36 +283,47 @@ export async function executeRuleMatching(
     if (isStopped(batchId)) throw new Error('任务被用户停止')
     const bank = bankTxns[i]
     level3Processed++
-    
+
     const normalizedBankName = normalizeName(bank.payerName)
     const relatedCompanies = personToCompanies.get(normalizedBankName)
-    
+
     if (!relatedCompanies || relatedCompanies.length === 0) continue
-    
+
     // 查找关系映射匹配
     const matchedInvoice = invoiceList.find(inv => {
       if (matchedInvoiceIds.has(inv.id)) return false
-      
+
       const normalizedSellerName = normalizeName(inv.sellerName)
-      if (!relatedCompanies.includes(normalizedSellerName)) return false
-      
+      const normalizedBuyerName = normalizeName(inv.buyerName)
+
+      // 检查销方或购方是否在关联公司列表中
+      const isRelated = relatedCompanies.includes(normalizedSellerName) ||
+        relatedCompanies.includes(normalizedBuyerName)
+
+      if (!isRelated) return false
+
       // 金额匹配（完美或容差）
       const diff = Math.abs(inv.amount - bank.amount)
       return diff === 0 || (inv.amount > bank.amount && diff <= TOLERANCE_AMOUNT)
     })
-    
+
     if (matchedInvoice) {
       const diff = matchedInvoice.amount - bank.amount
-      const mapping = mappings.find(m => 
+      const ns = normalizeName(matchedInvoice.sellerName)
+      const nb = normalizeName(matchedInvoice.buyerName)
+
+      const mapping = mappings.find(m =>
         normalizeName(m.personName) === normalizedBankName &&
-        normalizeName(m.companyName) === normalizeName(matchedInvoice.sellerName)
+        (normalizeName(m.companyName) === ns || normalizeName(m.companyName) === nb)
       )
-      
+
+      const companyName = mapping ? mapping.companyName : (relatedCompanies.includes(ns) ? matchedInvoice.sellerName : matchedInvoice.buyerName)
+
       allMatches.push({
         bankId: bank.id,
         invoiceId: matchedInvoice.id,
         matchType: 'proxy',
-        reason: `代付关系：${bank.payerName} 代表 ${matchedInvoice.sellerName} 付款${mapping?.remark ? `（${mapping.remark}）` : ''}`,
+        reason: `代付关系：${bank.payerName} 代表 ${companyName} 付款${mapping?.remark ? `（${mapping.remark}）` : ''}`,
         confidence: 0.99,
         amountDiff: diff > 0 ? diff : 0,
       })
@@ -297,7 +331,7 @@ export async function executeRuleMatching(
       matchedInvoiceIds.add(matchedInvoice.id)
       proxyCount++
     }
-    
+
     if (level3Processed % 50 === 0) {
       onProgress?.({
         level: 3,
@@ -308,21 +342,21 @@ export async function executeRuleMatching(
       })
     }
   }
-  
+
   console.log(`[Matching] Level 3 关系映射匹配完成: ${proxyCount} 条`)
-  
+
   // ============================================
   // 保存匹配结果
   // ============================================
   await saveMatchResults(batchId, allMatches)
-  
+
   // 更新银行流水和发票状态
   await updateTransactionStatus(allMatches)
-  
+
   // 更新批次统计
   const remainingBankCount = bankTxns.length - matchedBankIds.size
   const remainingInvoiceCount = invoiceList.length - matchedInvoiceIds.size
-  
+
   await db.update(reconciliationBatches)
     .set({
       status: 'matching',
@@ -330,12 +364,12 @@ export async function executeRuleMatching(
       unmatchedCount: remainingBankCount + remainingInvoiceCount,
     })
     .where(eq(reconciliationBatches.id, batchId))
-  
+
   const duration = Date.now() - startTime
-  
+
   console.log(`[Matching] 规则匹配完成，耗时 ${duration}ms`)
   console.log(`[Matching] 统计: 完美=${perfectCount}, 容差=${toleranceCount}, 代付=${proxyCount}, 剩余=${remainingBankCount}`)
-  
+
   return {
     perfectCount,
     toleranceCount,
@@ -352,10 +386,10 @@ export async function executeRuleMatching(
  */
 async function saveMatchResults(batchId: string, matches: MatchRecord[]): Promise<void> {
   if (matches.length === 0) return
-  
+
   const db = getDatabase()
   const now = new Date()
-  
+
   const records: NewMatchResult[] = matches.map(m => ({
     id: uuidv4(),
     batchId,
@@ -369,14 +403,14 @@ async function saveMatchResults(batchId: string, matches: MatchRecord[]): Promis
     confirmed: m.confidence >= 0.8,
     createdAt: now,
   }))
-  
+
   // 分批插入
   const BATCH_SIZE = 100
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     const batch = records.slice(i, i + BATCH_SIZE)
     await db.insert(matchResults).values(batch)
   }
-  
+
   console.log(`[Matching] 保存 ${records.length} 条匹配结果`)
 }
 
@@ -385,7 +419,7 @@ async function saveMatchResults(batchId: string, matches: MatchRecord[]): Promis
  */
 async function updateTransactionStatus(matches: MatchRecord[]): Promise<void> {
   const db = getDatabase()
-  
+
   for (const match of matches) {
     // 更新银行流水状态
     await db.update(bankTransactions)
@@ -394,7 +428,7 @@ async function updateTransactionStatus(matches: MatchRecord[]): Promise<void> {
         matchId: match.bankId,  // 自引用，用于关联
       })
       .where(eq(bankTransactions.id, match.bankId))
-    
+
     // 更新发票状态
     await db.update(invoices)
       .set({
@@ -446,6 +480,9 @@ export async function getMatchResults(batchId: string) {
     reason: matchResults.reason,
     amountDiff: matchResults.amountDiff,
     confidence: matchResults.confidence,
+    needsConfirmation: matchResults.needsConfirmation,
+    confirmed: matchResults.confirmed,
+    proxyInfo: matchResults.proxyInfo,
     bankPayer: bankTransactions.payerName,
     bankAmount: bankTransactions.amount,
     invoiceSeller: invoices.sellerName,
@@ -458,19 +495,76 @@ export async function getMatchResults(batchId: string) {
 }
 
 /**
+ * 确认匹配结果
+ */
+export async function confirmMatch(
+  matchId: string,
+  saveMapping: boolean = false
+): Promise<void> {
+  const db = getDatabase()
+
+  // 1. 获取匹配详情
+  const result = await db.select()
+    .from(matchResults)
+    .where(eq(matchResults.id, matchId))
+    .limit(1)
+
+  if (result.length === 0) throw new Error('匹配记录不存在')
+  const match = result[0]
+
+  // 2. 更新确认状态
+  await db.update(matchResults)
+    .set({
+      confirmed: true,
+      needsConfirmation: false
+    })
+    .where(eq(matchResults.id, matchId))
+
+  // 3. 如果需要保存代付关系
+  if (saveMapping && match.proxyInfo) {
+    try {
+      const { personName, companyName } = JSON.parse(match.proxyInfo)
+      if (personName && companyName) {
+        // 检查是否已存在
+        const existing = await db.select()
+          .from(payerMappings)
+          .where(and(
+            eq(payerMappings.personName, personName),
+            eq(payerMappings.companyName, companyName)
+          ))
+          .limit(1)
+
+        if (existing.length === 0) {
+          await db.insert(payerMappings).values({
+            id: uuidv4(),
+            personName,
+            companyName,
+            source: 'ai_extracted',
+            createdAt: new Date()
+          })
+          console.log(`[Matching] 已保存代付关系: ${personName} -> ${companyName}`)
+        }
+      }
+    } catch (e) {
+      console.error('[Matching] 解析或保存代付记录失败:', e)
+    }
+  }
+}
+
+/**
  * 获取批次的匹配统计
  */
 export async function getMatchingStats(batchId: string): Promise<MatchingStats> {
   const results = await getMatchResults(batchId)
-  
+
   const perfectCount = results.filter(r => r.matchType === 'perfect').length
   const toleranceCount = results.filter(r => r.matchType === 'tolerance').length
   const proxyCount = results.filter(r => r.matchType === 'proxy').length
   const aiCount = results.filter(r => r.matchType === 'ai').length
-  
+
   const unmatchedBank = await getUnmatchedBankTransactions(batchId)
   const unmatchedInvoice = await getUnmatchedInvoices(batchId)
-  
+
   return {
     perfectCount,
     toleranceCount,

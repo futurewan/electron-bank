@@ -164,6 +164,8 @@ export const invoices = sqliteTable('invoices', {
   taxRate: text('tax_rate'),
   invoiceType: text('invoice_type'),
   itemName: text('item_name'),
+  remark: text('remark'),
+  issuer: text('issuer'),
   parseSource: text('parse_source'),       // metadata / textlayer / both / none
   sourceFilePath: text('source_file_path'),
 }, (table) => ({
@@ -206,6 +208,7 @@ export const matchResults = sqliteTable('match_results', {
   amountDiff: real('amount_diff'),
   needsConfirmation: integer('needs_confirmation', { mode: 'boolean' }).default(false),
   confirmed: integer('confirmed', { mode: 'boolean' }).default(false),
+  proxyInfo: text('proxy_info'), // JSON 存储代付信息
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 }, (table) => ({
   batchIdIdx: index('idx_match_batch_id').on(table.batchId),

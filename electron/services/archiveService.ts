@@ -11,7 +11,7 @@ import {
   getNextArchiveDir,
 } from './folderService'
 import { ARCHIVE_SUB_DIRS } from '../utils/workspacePaths'
-import { getBankStatementPath, getInvoicePath } from '../utils/workspacePaths'
+import { getBankStatementPath, getInvoicePath, getArchivePath } from '../utils/workspacePaths'
 
 /**
  * 归档结果
@@ -46,8 +46,19 @@ export async function archiveBatch(batchId: string): Promise<ArchiveResult> {
       return { success: false, error: '未配置工作目录' }
     }
 
-    // 3. 创建归档目录（YYYYMMDD-N 格式）
-    const archiveInfo = getNextArchiveDir(workspaceFolder)
+    // 3. 创建归档目录
+    // 逻辑变更：如果 batchId 符合 YYYYMMDD-N 格式，直接使用该名称作为归档文件夹名
+    // 否则使用 getNextArchiveDir 生成新的
+    let archiveInfo: { dirPath: string; dirName: string }
+
+    if (/^\d{8}-\d+$/.test(batchId)) {
+      const dirPath = path.join(getArchivePath(workspaceFolder), batchId)
+      archiveInfo = { dirPath, dirName: batchId }
+    } else {
+      const nextInfo = getNextArchiveDir(workspaceFolder)
+      archiveInfo = { dirPath: nextInfo.dirPath, dirName: nextInfo.dirName }
+    }
+
     createArchiveSubDirs(archiveInfo.dirPath)
 
     let movedCount = 0

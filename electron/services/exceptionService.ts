@@ -17,7 +17,7 @@ import {
 // 类型定义
 // ============================================
 
-export type ExceptionType = 
+export type ExceptionType =
   | 'NO_INVOICE'        // 有水无票
   | 'NO_BANK_TXN'       // 有票无水
   | 'DUPLICATE_PAYMENT' // 重复支付
@@ -50,7 +50,7 @@ export interface ExceptionRecord {
 export async function detectExceptions(batchId: string): Promise<DetectionResult> {
   console.log(`[Exception] 开始检测异常, batchId=${batchId}`)
   const db = getDatabase()
-  
+
   // --- 关键重构：先清理，后探测，杜绝重复累加 ---
   // 1. 恢复流水和发票的状态位，防止状态机死锁
   await db.update(bankTransactions)
@@ -59,7 +59,7 @@ export async function detectExceptions(batchId: string): Promise<DetectionResult
       eq(bankTransactions.batchId, batchId),
       eq(bankTransactions.status, 'exception')
     ))
-  
+
   await db.update(invoices)
     .set({ status: 'pending' })
     .where(and(
@@ -91,39 +91,39 @@ export async function detectExceptions(batchId: string): Promise<DetectionResult
       low: 0,
     },
   }
-  
+
   // 1. 检测有水无票
   const noInvoiceCount = await detectNoInvoice(batchId)
   result.byType.NO_INVOICE = noInvoiceCount
   result.totalExceptions += noInvoiceCount
-  
+
   // 2. 检测有票无水
   const noBankTxnCount = await detectNoBankTransaction(batchId)
   result.byType.NO_BANK_TXN = noBankTxnCount
   result.totalExceptions += noBankTxnCount
-  
+
   // 3. 检测重复支付
   const duplicateCount = await detectDuplicatePayments(batchId)
   result.byType.DUPLICATE_PAYMENT = duplicateCount
   result.totalExceptions += duplicateCount
-  
+
   // 4. 检测金额严重不符（已匹配但差异过大）
   const mismatchCount = await detectAmountMismatch(batchId)
   result.byType.AMOUNT_MISMATCH = mismatchCount
   result.totalExceptions += mismatchCount
-  
+
   // 计算严重程度统计
   const allExceptions = await db.select()
     .from(exceptions)
     .where(eq(exceptions.batchId, batchId))
-  
+
   for (const exc of allExceptions) {
     const sev = exc.severity as ExceptionSeverity
     result.bySeverity[sev] = (result.bySeverity[sev] || 0) + 1
   }
-  
+
   console.log(`[Exception] 检测完成, 共发现 ${result.totalExceptions} 个异常`)
-  
+
   return result
 }
 
@@ -132,7 +132,7 @@ export async function detectExceptions(batchId: string): Promise<DetectionResult
  */
 async function detectNoInvoice(batchId: string): Promise<number> {
   const db = getDatabase()
-  
+
   // 获取所有未匹配的银行流水
   const unmatchedBank = await db.select()
     .from(bankTransactions)
@@ -140,14 +140,14 @@ async function detectNoInvoice(batchId: string): Promise<number> {
       eq(bankTransactions.batchId, batchId),
       eq(bankTransactions.status, 'pending')
     ))
-  
+
   let count = 0
   const now = new Date()
-  
+
   for (const tx of unmatchedBank) {
     // 既然在开始已经清理了 pending，这里就不再检查 existing，直接插入以保证实时性
     const severity: ExceptionSeverity = tx.amount > 10000 ? 'high' : tx.amount > 1000 ? 'medium' : 'low'
-    
+
     const exception: NewException = {
       id: uuidv4(),
       batchId,
@@ -165,17 +165,17 @@ async function detectNoInvoice(batchId: string): Promise<number> {
       status: 'pending',
       createdAt: now,
     }
-    
+
     await db.insert(exceptions).values(exception)
-    
+
     // 更新银行流水状态为异常
     await db.update(bankTransactions)
       .set({ status: 'exception' })
       .where(eq(bankTransactions.id, tx.id))
-    
+
     count++
   }
-  
+
   console.log(`[Exception] 有水无票: ${count} 条`)
   return count
 }
@@ -185,20 +185,20 @@ async function detectNoInvoice(batchId: string): Promise<number> {
  */
 async function detectNoBankTransaction(batchId: string): Promise<number> {
   const db = getDatabase()
-  
+
   const unmatchedInvoices = await db.select()
     .from(invoices)
     .where(and(
       eq(invoices.batchId, batchId),
       eq(invoices.status, 'pending')
     ))
-  
+
   let count = 0
   const now = new Date()
-  
+
   for (const inv of unmatchedInvoices) {
     const severity: ExceptionSeverity = inv.amount > 10000 ? 'high' : inv.amount > 1000 ? 'medium' : 'low'
-    
+
     const exception: NewException = {
       id: uuidv4(),
       batchId,
@@ -212,21 +212,22 @@ async function detectNoBankTransaction(batchId: string): Promise<number> {
         sellerName: inv.sellerName,
         amount: inv.amount,
         invoiceDate: inv.invoiceDate,
+        sourceFilePath: inv.sourceFilePath,
       }),
       suggestion: `发票 ¥${inv.amount} 未找到对应银行流水，请确认款项是否已到账。`,
       status: 'pending',
       createdAt: now,
     }
-    
+
     await db.insert(exceptions).values(exception)
-    
+
     await db.update(invoices)
       .set({ status: 'exception' })
       .where(eq(invoices.id, inv.id))
-    
+
     count++
   }
-  
+
   console.log(`[Exception] 有票无水: ${count} 条`)
   return count
 }
@@ -236,14 +237,14 @@ async function detectNoBankTransaction(batchId: string): Promise<number> {
  */
 async function detectDuplicatePayments(batchId: string): Promise<number> {
   const db = getDatabase()
-  
+
   // 查找同一付款人、相同金额的流水
   const allBank = await db.select()
     .from(bankTransactions)
     .where(eq(bankTransactions.batchId, batchId))
-  
+
   const grouped: Record<string, typeof allBank> = {}
-  
+
   for (const tx of allBank) {
     // 用 付款人+金额 作为 key
     const key = `${tx.payerName}_${tx.amount.toFixed(2)}`
@@ -252,28 +253,28 @@ async function detectDuplicatePayments(batchId: string): Promise<number> {
     }
     grouped[key].push(tx)
   }
-  
+
   let count = 0
   const now = new Date()
-  
+
   for (const [_key, txList] of Object.entries(grouped)) {
     if (txList.length < 2) continue
-    
+
     // 检查日期是否相近（7天内）
     const sortedByDate = txList.sort((a, b) => {
       const dateA = a.transactionDate?.getTime() || 0
       const dateB = b.transactionDate?.getTime() || 0
       return dateA - dateB
     })
-    
+
     for (let i = 1; i < sortedByDate.length; i++) {
       const prev = sortedByDate[i - 1]
       const curr = sortedByDate[i]
-      
+
       const prevTime = prev.transactionDate?.getTime() || 0
       const currTime = curr.transactionDate?.getTime() || 0
       const daysDiff = (currTime - prevTime) / (1000 * 60 * 60 * 24)
-      
+
       if (daysDiff <= 7) {
         // 直接插入，不再检查 existing
         const exception: NewException = {
@@ -302,13 +303,13 @@ async function detectDuplicatePayments(batchId: string): Promise<number> {
           status: 'pending',
           createdAt: now,
         }
-        
+
         await db.insert(exceptions).values(exception)
         count++
       }
     }
   }
-  
+
   console.log(`[Exception] 重复支付疑似: ${count} 条`)
   return count
 }
@@ -318,22 +319,27 @@ async function detectDuplicatePayments(batchId: string): Promise<number> {
  */
 async function detectAmountMismatch(batchId: string): Promise<number> {
   const db = getDatabase()
-  
-  // 获取所有匹配结果
-  const matches = await db.select()
+
+  // 获取所有匹配结果以及对应的发票
+  const matches = await db.select({
+    match: matchResults,
+    invoice: invoices,
+  })
     .from(matchResults)
+    .leftJoin(invoices, eq(matchResults.invoiceId, invoices.id))
     .where(eq(matchResults.batchId, batchId))
-  
+
   let count = 0
   const now = new Date()
   const MISMATCH_THRESHOLD = 100 // 差异超过 100 元视为严重不符
-  
-  for (const match of matches) {
+
+  for (const row of matches) {
+    const { match, invoice } = row
     const diff = Math.abs(match.amountDiff || 0)
-    
+
     if (diff > MISMATCH_THRESHOLD) {
       const severity: ExceptionSeverity = diff > 500 ? 'high' : diff > 200 ? 'medium' : 'low'
-      
+
       const exception: NewException = {
         id: uuidv4(),
         batchId,
@@ -346,17 +352,18 @@ async function detectAmountMismatch(batchId: string): Promise<number> {
           matchType: match.matchType,
           amountDiff: match.amountDiff,
           reason: match.reason,
+          sourceFilePath: invoice?.sourceFilePath,
         }),
         suggestion: `匹配金额差异 ¥${diff.toFixed(2)} 超过阈值，请人工复核。`,
         status: 'pending',
         createdAt: now,
       }
-      
+
       await db.insert(exceptions).values(exception)
       count++
     }
   }
-  
+
   console.log(`[Exception] 金额严重不符: ${count} 条`)
   return count
 }
@@ -366,23 +373,114 @@ async function detectAmountMismatch(batchId: string): Promise<number> {
 // ============================================
 
 /**
- * 获取批次的所有异常
+ * 获取批次的所有异常（含关联发票的 sourceFilePath）
  */
 export async function getExceptions(batchId: string, status?: string) {
   const db = getDatabase()
-  
-  if (status) {
-    return db.select()
-      .from(exceptions)
-      .where(and(
-        eq(exceptions.batchId, batchId),
-        eq(exceptions.status, status as any)
-      ))
-  }
-  
-  return db.select()
+
+  const baseQuery = db
+    .select({
+      id: exceptions.id,
+      batchId: exceptions.batchId,
+      type: exceptions.type,
+      severity: exceptions.severity,
+      relatedBankId: exceptions.relatedBankId,
+      relatedInvoiceId: exceptions.relatedInvoiceId,
+      detail: exceptions.detail,
+      suggestion: exceptions.suggestion,
+      status: exceptions.status,
+      resolution: exceptions.resolution,
+      resolvedAt: exceptions.resolvedAt,
+      createdAt: exceptions.createdAt,
+      invoiceSourceFilePath: invoices.sourceFilePath,
+    })
     .from(exceptions)
-    .where(eq(exceptions.batchId, batchId))
+    .leftJoin(invoices, eq(exceptions.relatedInvoiceId, invoices.id))
+
+  if (status) {
+    return baseQuery.where(and(
+      eq(exceptions.batchId, batchId),
+      eq(exceptions.status, status as any)
+    ))
+  }
+
+  return baseQuery.where(eq(exceptions.batchId, batchId))
+}
+
+/**
+ * 使用 AI 诊断异常信息
+ */
+export async function diagnoseExceptionsWithAI(
+  batchId: string,
+  onProgress?: (current: number, total: number, message: string) => void
+): Promise<void> {
+  const db = getDatabase()
+  const ai = (await import('./aiService')).aiService
+
+  // 获取所有待处理的异常
+  const pendingExceptions = await db.select()
+    .from(exceptions)
+    .where(and(
+      eq(exceptions.batchId, batchId),
+      eq(exceptions.status, 'pending')
+    ))
+
+  if (pendingExceptions.length === 0) return
+
+  console.log(`[Exception AI] 开始诊断 ${pendingExceptions.length} 个异常`)
+
+  // 为了性能和费用，仅诊断前 50 个最严重的异常
+  const toProcess = pendingExceptions.slice(0, 50)
+
+  for (let i = 0; i < toProcess.length; i++) {
+    const exc = toProcess[i]
+    onProgress?.(i + 1, toProcess.length, `正在 AI 诊断异常 ${i + 1}/${toProcess.length}...`)
+
+    try {
+      const detail = JSON.parse(exc.detail || '{}')
+
+      const prompt = `
+      You are a senior financial auditor. Analyze this accounting exception and provide a diagnosis and recommended action.
+
+      Exception Type: ${exc.type}
+      Severity: ${exc.severity}
+      Context Data:
+      ${JSON.stringify(detail, null, 2)}
+
+      Task:
+      1. Diagnosis: Explain why this might have happened (e.g., missing invoice, wrong amount, timing difference, potential duplicate).
+      2. Suggestion: What the user should do next to resolve it.
+
+      Output JSON:
+      {
+        "diagnosis": "Chinese diagnosis string",
+        "suggestion": "Chinese suggestion string"
+      }
+      `
+
+      const result = await ai.getJSON<{ diagnosis: string; suggestion: string }>(
+        "Diagnose financial reconciliation exception",
+        prompt,
+        0.3
+      )
+
+      if (result.diagnosis && result.suggestion) {
+        // 更新异常信息
+        // 将诊断结果存入 detail 字段，并更新核心 suggestion
+        const updatedDetail = { ...detail, diagnosis: result.diagnosis }
+
+        await db.update(exceptions)
+          .set({
+            detail: JSON.stringify(updatedDetail),
+            suggestion: result.suggestion
+          })
+          .where(eq(exceptions.id, exc.id))
+      }
+
+    } catch (error) {
+      console.error(`[Exception AI] Failed to diagnose ${exc.id}:`, error)
+    }
+  }
 }
 
 /**
@@ -394,7 +492,7 @@ export async function resolveException(
   note?: string
 ): Promise<void> {
   const db = getDatabase()
-  
+
   await db.update(exceptions)
     .set({
       status: resolution,
@@ -402,6 +500,6 @@ export async function resolveException(
       resolvedAt: new Date(),
     })
     .where(eq(exceptions.id, exceptionId))
-  
+
   console.log(`[Exception] 异常已处理: ${exceptionId} -> ${resolution}`)
 }

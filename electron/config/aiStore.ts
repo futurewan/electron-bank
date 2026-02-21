@@ -10,16 +10,16 @@ import Store from 'electron-store'
  */
 export interface AIConfig {
   // 提供商
-  provider: 'openai' | 'anthropic' | 'custom'
-  
+  provider: 'openai' | 'anthropic' | 'custom' | 'deepseek'
+
   // 模型配置
   model: string
   temperature: number
   maxTokens: number
-  
+
   // 自定义端点（可选）
   customEndpoint?: string
-  
+
   // 统计信息
   totalTokensUsed: number
   lastUsedAt?: number
@@ -32,6 +32,7 @@ interface EncryptedKeys {
   openai?: string
   anthropic?: string
   custom?: string
+  deepseek?: string
 }
 
 // 默认 AI 配置
@@ -73,16 +74,16 @@ export class AIKeyManager {
     if (!apiKey) {
       throw new Error('API Key 不能为空')
     }
-    
+
     if (safeStorage.isEncryptionAvailable()) {
       // 使用系统级加密
       const encrypted = safeStorage.encryptString(apiKey)
       const base64 = encrypted.toString('base64')
-      
+
       const keys = keyStore.get('keys') || {}
       keys[provider as keyof EncryptedKeys] = base64
       keyStore.set('keys', keys)
-      
+
       console.log(`[AI] API Key for ${provider} saved (encrypted)`)
     } else {
       // 回退：不加密存储（不推荐，仅用于开发）
@@ -99,11 +100,11 @@ export class AIKeyManager {
   static getApiKey(provider: string): string | null {
     const keys = keyStore.get('keys') || {}
     const stored = keys[provider as keyof EncryptedKeys]
-    
+
     if (!stored) {
       return null
     }
-    
+
     if (safeStorage.isEncryptionAvailable()) {
       try {
         const buffer = Buffer.from(stored, 'base64')

@@ -35,6 +35,7 @@ import {
 import {
   getMatchingStats,
   getMatchResults,
+  confirmMatch,
 } from '../../services/matchingService'
 import { executeReconciliation } from '../../services/reconciliationService'
 import { getReports, getReportsByBatchId } from '../../services/reportService'
@@ -343,12 +344,34 @@ async function handleGetMatchResults(
   try {
     const results = await getMatchResults(params.batchId)
     // 简单的客户端过滤
+    if (params.type === 'explainable') {
+      return {
+        success: true,
+        results: results.filter(r => ['tolerance', 'proxy', 'ai'].includes(r.matchType as string))
+      }
+    }
     if (params.type) {
       return { success: true, results: results.filter(r => r.matchType === params.type) }
     }
     return { success: true, results }
   } catch (error) {
     console.error('[Reconciliation] Get match results error:', error)
+    return { success: false, error: String(error) }
+  }
+}
+
+/**
+ * 确认匹配结果
+ */
+async function handleConfirmMatch(
+  _event: IpcMainInvokeEvent,
+  params: { matchId: string; saveMapping?: boolean }
+) {
+  try {
+    await confirmMatch(params.matchId, params.saveMapping)
+    return { success: true }
+  } catch (error) {
+    console.error('[Reconciliation] Confirm match error:', error)
     return { success: false, error: String(error) }
   }
 }
@@ -683,6 +706,7 @@ export function registerReconciliationHandlers(): void {
   ipcMain.handle(RECONCILIATION_CHANNELS.STOP_RECONCILIATION, handleStopReconciliation)
   ipcMain.handle(RECONCILIATION_CHANNELS.GET_MATCHING_STATS, handleGetMatchingStats)
   ipcMain.handle(RECONCILIATION_CHANNELS.GET_MATCH_RESULTS, handleGetMatchResults)
+  ipcMain.handle(RECONCILIATION_CHANNELS.CONFIRM_MATCH, handleConfirmMatch)
 
   // AI 匹配（占位）
   ipcMain.handle(RECONCILIATION_CHANNELS.EXECUTE_AI_MATCHING, handleExecuteAIMatching)
@@ -819,7 +843,11 @@ async function handleExportInvoicesExcel(
     )
 
     if (!parseResult.success || parseResult.invoices.length === 0) {
-      return { success: false, error: '没有成功解析任何发票', parseResult }
+      // Include error details from parseResult for better debugging
+      const errorDetails = parseResult.errors && parseResult.errors.length > 0
+        ? ': ' + parseResult.errors.map(e => e.error).join('; ')
+        : ''
+      return { success: false, error: '没有成功解析任何发票' + errorDetails, parseResult }
     }
 
     // 确定输出路径
@@ -838,8 +866,9 @@ async function handleExportInvoicesExcel(
     }
 
     // 导出 Excel
-    const exportResult = exportInvoicesToExcel(parseResult.invoices, outputPath)
+    const exportResult = await exportInvoicesToExcel(parseResult.invoices, outputPath)
 
+    console.log('exportResult', exportResult)
     return {
       ...exportResult,
       invoices: parseResult.invoices,  // 返回解析后的发票数据供前端直接入库
