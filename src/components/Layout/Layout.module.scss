@@ -39,8 +39,10 @@
     /* 侧边栏顶部可拖动 */
 }
 
-.logoIcon {
-    font-size: 28px;
+.logoImage {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
     flex-shrink: 0;
 }
 

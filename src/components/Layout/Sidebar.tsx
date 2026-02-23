@@ -73,6 +73,7 @@ function Sidebar({ collapsed }: SidebarProps): JSX.Element {
         >
             {/* Logo 区域 */}
             <div className={styles.logo}>
+                <img src="/logo.png" alt="Logo" className={styles.logoImage} />
                 {!collapsed && <span className={styles.logoText}>AI 对账助手</span>}
             </div>
 

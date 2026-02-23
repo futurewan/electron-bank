@@ -30,8 +30,10 @@
   margin-bottom: 40px;
 }
 
-.logoIcon {
-  font-size: 48px;
+.logoImage {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
   margin-bottom: 16px;
 }
 

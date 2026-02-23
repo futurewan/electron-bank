@@ -130,7 +130,9 @@ app.whenReady().then(() => {
 
   // 设置 macOS 下的 Dock 图标
   if (process.platform === 'darwin') {
-    const image = nativeImage.createFromPath(path.join(process.env.VITE_PUBLIC, 'logo.png'))
+    const iconPath = path.join(process.env.VITE_PUBLIC, 'logo.png')
+    console.log('[App] Setting dock icon from:', iconPath)
+    const image = nativeImage.createFromPath(iconPath)
     app.dock.setIcon(image)
   }
 
