@@ -11,7 +11,7 @@
 }
 
 /* 内部布局容器 (Header + Content) */
-.layout > :global(.ant-layout) {
+.layout> :global(.ant-layout) {
     height: 100% !important;
     display: flex;
     flex-direction: column;
@@ -25,15 +25,14 @@
     overflow: hidden;
 }
 
-/* Logo 区域 - 与 Header 同高，可拖动 */
+/* Logo 区域 - 增加高度并添加顶部内边距以避开 macOS 交通灯 */
 .logo {
-    height: 64px;
-    /* 与 Header 高度一致 */
+    height: 94px;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 12px;
-    padding: 0 16px;
+    padding: 30px 16px 0 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     -webkit-app-region: drag;
     /* 侧边栏顶部可拖动 */
@@ -81,7 +80,7 @@
 .header {
     height: 64px;
     background: #ffffff !important;
-    padding: 0 24px 0 80px !important;
+    padding: 0 24px 0 30px !important;
     /* 左侧为 macOS 交通灯预留空间 */
     display: flex;
     align-items: center;

@@ -103,7 +103,7 @@ export const aiService = {
    */
   async getProvider(): Promise<string> {
     const config = await this.getConfig()
-    return config?.provider || 'openai'
+    return config?.provider || 'deepseek'
   },
 
   /**
@@ -111,7 +111,7 @@ export const aiService = {
    */
   async getModel(): Promise<string> {
     const config = await this.getConfig()
-    return config?.model || 'gpt-4o-mini'
+    return config?.model || 'deepseek-chat'
   },
 
   /**

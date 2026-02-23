@@ -34,7 +34,7 @@ export interface AppConfig {
  * AI 配置
  */
 export interface AIConfig {
-  provider: 'openai' | 'anthropic' | 'custom'
+  provider: 'openai' | 'anthropic' | 'custom' | 'deepseek'
   model: string
   temperature: number
   maxTokens: number

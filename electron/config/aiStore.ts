@@ -37,8 +37,8 @@ interface EncryptedKeys {
 
 // 默认 AI 配置
 const defaultAIConfig: AIConfig = {
-  provider: 'openai',
-  model: 'gpt-4o-mini',
+  provider: 'deepseek',
+  model: 'deepseek-chat',
   temperature: 0.7,
   maxTokens: 2000,
   totalTokensUsed: 0,
@@ -49,6 +49,12 @@ const aiConfigStore = new Store<AIConfig>({
   name: 'ai-config',
   defaults: defaultAIConfig,
 })
+
+// 为平滑迁移，如果当前配置还是旧的默认值，强制更新为 DeepSeek
+if (aiConfigStore.get('provider') === 'openai' && aiConfigStore.get('model') === 'gpt-4o-mini') {
+  aiConfigStore.set('provider', 'deepseek')
+  aiConfigStore.set('model', 'deepseek-chat')
+}
 
 // 加密 Key 存储实例
 const keyStore = new Store<{ keys: EncryptedKeys }>({

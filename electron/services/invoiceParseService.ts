@@ -5,7 +5,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { eq, and, or, isNull, sql } from 'drizzle-orm'
+import { eq, and, or, isNull } from 'drizzle-orm'
 import { getDatabase } from '../database/client'
 import { invoices } from '../database/schema'
 import { pythonService } from './pythonService'

@@ -52,7 +52,6 @@ function robustRename(src: string, dest: string): void {
  * @param preCreatedArchiveInfo 可选：已预先创建的归档信息（避免生成重复目录）
  */
 export async function archiveBatch(batchId: string, preCreatedArchiveInfo?: { dirPath: string; dirName: string }): Promise<ArchiveResult> {
-  const result: ArchiveResult = { success: false, movedFilesCount: 0 }
   try {
     // 1. 获取批次详情
     const batch = await getBatch(batchId)

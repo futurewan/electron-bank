@@ -1,5 +1,8 @@
 {
   "name": "ai-reconciliation-agent",
+  "version": "1.0.0",
+  "description": "AI-powered reconciliation assistant",
+  "author": "futurewan",
   "private": true,
   "type": "module",
   "scripts": {

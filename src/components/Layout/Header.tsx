@@ -1,6 +1,5 @@
-import type { MenuProps } from 'antd'
-import { Avatar, Badge, Button, Dropdown, Layout } from 'antd'
-import { Bell, LogOut, Menu, Settings, User } from 'lucide-react'
+import { Button, Layout } from 'antd'
+import { Menu } from 'lucide-react'
 import styles from './Layout.module.scss'
 
 const { Header: AntHeader } = Layout
@@ -11,27 +10,7 @@ interface HeaderProps {
 }
 
 // 用户下拉菜单
-const userMenuItems: MenuProps['items'] = [
-    {
-        key: 'profile',
-        icon: <User size={16} />,
-        label: '个人信息',
-    },
-    {
-        key: 'settings',
-        icon: <Settings size={16} />,
-        label: '账户设置',
-    },
-    {
-        type: 'divider',
-    },
-    {
-        key: 'logout',
-        icon: <LogOut size={16} />,
-        label: '退出登录',
-        danger: true,
-    },
-]
+
 
 /**
  * 顶部导航栏组件
@@ -53,7 +32,7 @@ function Header({ collapsed: _collapsed, onToggle }: HeaderProps): JSX.Element {
 
             {/* 右侧：通知和用户 */}
             <div className={styles.headerRight}>
-                {/* 通知图标 */}
+                {/* 通知图标 - 已注释
                 <Badge count={3} size="small">
                     <Button
                         type="text"
@@ -61,8 +40,9 @@ function Header({ collapsed: _collapsed, onToggle }: HeaderProps): JSX.Element {
                         className={styles.iconButton}
                     />
                 </Badge>
+                */}
 
-                {/* 用户头像下拉菜单 */}
+                {/* 用户头像下拉菜单 - 已注释
                 <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
                     <div className={styles.userAvatar}>
                         <Avatar
@@ -76,6 +56,7 @@ function Header({ collapsed: _collapsed, onToggle }: HeaderProps): JSX.Element {
                         </Avatar>
                     </div>
                 </Dropdown>
+                */}
             </div>
         </AntHeader>
     )
