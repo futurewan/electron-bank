@@ -201,13 +201,26 @@ async function generateAutoEntryReport(
     return null
   }
 
+  // 按 bankId+invoiceId 去重，保留最早创建（或最高置信度）的记录
+  const seenPairs = new Set<string>()
+  const uniqueMatches = allMatches.filter(m => {
+    const key = `${m.bankId}__${m.invoiceId}`
+    if (seenPairs.has(key)) return false
+    seenPairs.add(key)
+    return true
+  })
+
+  if (uniqueMatches.length !== allMatches.length) {
+    console.log(`[Report] 自动入账凭证报告去重: ${allMatches.length} -> ${uniqueMatches.length} (移除 ${allMatches.length - uniqueMatches.length} 条重复)`)
+  }
+
   // 构建双行表头
   const headerRow1 = ['序号', '交易日期', '银行流水信息(资金流)', '', '关联单据信息(业务流)', '', '核销结果(AI产出)', '']
   const headerRow2 = ['', '', '对方户名/摘要', '到账金额', '客户名称/单据号', '应收金额', '核销金额', '差额']
   const rows: any[][] = [headerRow1, headerRow2]
 
   let index = 1
-  for (const match of allMatches) {
+  for (const match of uniqueMatches) {
     const bankTx = match.bankId
       ? (await db.select().from(bankTransactions).where(eq(bankTransactions.id, match.bankId)).limit(1))[0]
       : null
@@ -305,6 +318,15 @@ async function generateExplainableReport(
     return null
   }
 
+  // 去重 explainableMatches
+  const seenExplPairs = new Set<string>()
+  const uniqueExplainableMatches = explainableMatches.filter(m => {
+    const key = `${m.bankId}__${m.invoiceId}`
+    if (seenExplPairs.has(key)) return false
+    seenExplPairs.add(key)
+    return true
+  })
+
   // 需要计算关联序号：从自动入账凭证报告的序号中找到对应位置
   // 先获取所有匹配记录以确定序号
   const allMatches = await db.select()
@@ -314,9 +336,18 @@ async function generateExplainableReport(
       inArray(matchResults.matchType, ['perfect', 'tolerance', 'proxy', 'ai'])
     ))
 
+  // 去重后建立 matchId -> 序号映射
+  const seenAllPairs = new Set<string>()
+  const uniqueAllMatches = allMatches.filter(m => {
+    const key = `${m.bankId}__${m.invoiceId}`
+    if (seenAllPairs.has(key)) return false
+    seenAllPairs.add(key)
+    return true
+  })
+
   // 建立 matchId -> 序号映射
   const matchIndexMap = new Map<string, number>()
-  allMatches.forEach((m, idx) => matchIndexMap.set(m.id, idx + 1))
+  uniqueAllMatches.forEach((m, idx) => matchIndexMap.set(m.id, idx + 1))
 
   const typeLabels: Record<string, string> = {
     tolerance: '容差匹配（金额差异在容差范围内）',
@@ -328,7 +359,7 @@ async function generateExplainableReport(
     ['关联序号', 'AI匹配逻辑(Reasoning Chain)', '证据链(Evidence)', '置信度', '状态']
   ]
 
-  for (const match of explainableMatches) {
+  for (const match of uniqueExplainableMatches) {
     const seqNo = matchIndexMap.get(match.id) || '-'
 
     // 构建证据链
@@ -370,7 +401,7 @@ async function generateExplainableReport(
     throw new Error(`保存失败: ${error.message || '权限不足'}`)
   }
 
-  console.log(`[Report] 可解释性报告: ${explainableMatches.length} 条`)
+  console.log(`[Report] 可解释性报告: ${uniqueExplainableMatches.length} 条`)
   return filePath
 }
 

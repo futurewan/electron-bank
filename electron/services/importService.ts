@@ -201,7 +201,23 @@ export async function importBankTransactions(
   // await db.delete(bankTransactions).where(eq(bankTransactions.batchId, batchId))
   // ----------------------------------------------
 
-  const records: NewBankTransaction[] = parseResult.data.map((item) => ({
+  // --- 去重：按 payerName + amount + transactionDate 去重 ---
+  const seenKeys = new Set<string>()
+  const uniqueData = parseResult.data.filter(item => {
+    const dateStr = item.transactionDate
+      ? item.transactionDate.toISOString().split('T')[0]
+      : ''
+    const key = `${(item.payerName || '').trim()}|${item.amount}|${dateStr}`
+    if (seenKeys.has(key)) return false
+    seenKeys.add(key)
+    return true
+  })
+
+  if (uniqueData.length !== parseResult.data.length) {
+    console.log(`[Import] 银行流水去重: ${parseResult.data.length} -> ${uniqueData.length} (移除 ${parseResult.data.length - uniqueData.length} 条重复)`)
+  }
+
+  const records: NewBankTransaction[] = uniqueData.map((item) => ({
     id: uuidv4(),
     batchId,
     transactionDate: item.transactionDate,
@@ -305,7 +321,28 @@ export async function importInvoices(
   // await db.delete(invoices).where(eq(invoices.batchId, batchId))
   // ----------------------------------------------
 
-  const records: NewInvoice[] = parseResult.data.map((item) => ({
+  // --- 去重：按 invoiceNumber 或 sellerName+amount+date 去重 ---
+  const invSeenKeys = new Set<string>()
+  const uniqueInvData = parseResult.data.filter(item => {
+    let key: string
+    if (item.invoiceNumber) {
+      key = `num:${item.invoiceNumber}`
+    } else {
+      const dateStr = item.invoiceDate
+        ? item.invoiceDate.toISOString().split('T')[0]
+        : ''
+      key = `combo:${(item.sellerName || '').trim()}|${item.amount}|${dateStr}`
+    }
+    if (invSeenKeys.has(key)) return false
+    invSeenKeys.add(key)
+    return true
+  })
+
+  if (uniqueInvData.length !== parseResult.data.length) {
+    console.log(`[Import] 发票去重: ${parseResult.data.length} -> ${uniqueInvData.length} (移除 ${parseResult.data.length - uniqueInvData.length} 条重复)`)
+  }
+
+  const records: NewInvoice[] = uniqueInvData.map((item) => ({
     id: uuidv4(),
     batchId,
     invoiceCode: item.invoiceCode,

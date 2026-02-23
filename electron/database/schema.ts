@@ -99,7 +99,7 @@ export const reconciliationBatches = sqliteTable('reconciliation_batches', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   status: text('status', {
-    enum: ['pending', 'matching', 'completed', 'failed']
+    enum: ['pending', 'matching', 'completed', 'failed', 'unbalanced', 'archived']
   }).notNull().default('pending'),
   totalBankCount: integer('total_bank_count').default(0),
   totalInvoiceCount: integer('total_invoice_count').default(0),

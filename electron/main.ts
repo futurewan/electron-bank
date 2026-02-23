@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeImage } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { configStore, updateWindowState } from './config/store'
@@ -46,10 +46,10 @@ function getWindowState() {
  */
 function saveWindowState() {
   if (!win) return
-  
+
   const bounds = win.getBounds()
   const maximized = win.isMaximized()
-  
+
   updateWindowState({
     width: bounds.width,
     height: bounds.height,
@@ -62,7 +62,7 @@ function saveWindowState() {
 function createWindow() {
   // 获取保存的窗口状态
   const windowState = getWindowState()
-  
+
   win = new BrowserWindow({
     // 窗口尺寸配置（从配置恢复）
     width: windowState.width,
@@ -76,7 +76,7 @@ function createWindow() {
     center: windowState.x === undefined, // 如果没有保存位置则居中
     autoHideMenuBar: true, // 隐藏菜单栏
     // 窗口样式
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(process.env.VITE_PUBLIC, 'logo.png'),
     backgroundColor: '#F8FAFC', // S19 设计系统背景色
     // 标题栏样式（macOS）
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -121,16 +121,22 @@ function createWindow() {
 // 应用初始化
 app.whenReady().then(() => {
   console.log('[App] Starting...')
-  
+
   // 确保应用目录存在
   ensureAppDirs()
-  
+
   // 注册所有 IPC 处理器
   registerAllIpcHandlers()
-  
+
+  // 设置 macOS 下的 Dock 图标
+  if (process.platform === 'darwin') {
+    const image = nativeImage.createFromPath(path.join(process.env.VITE_PUBLIC, 'logo.png'))
+    app.dock.setIcon(image)
+  }
+
   // 创建窗口
   createWindow()
-  
+
   console.log('[App] Ready')
 })
 
@@ -155,9 +161,9 @@ app.on('activate', () => {
 // 应用退出前清理
 app.on('before-quit', () => {
   console.log('[App] Cleaning up...')
-  
+
   // 关闭数据库连接
   closeDatabase()
-  
+
   console.log('[App] Cleanup done')
 })

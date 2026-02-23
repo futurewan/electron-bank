@@ -41,7 +41,6 @@ const ReconciliationManagement: React.FC = () => {
     }>({ bankFiles: [], invoiceFiles: [] })
     const [pendingBatchName, setPendingBatchName] = useState('')
     const scanningRef = useRef(false) // Prevent double scanning
-    const pdfInvoicesRef = useRef<any[]>([]) // 暂存 PDF 解析后的发票数据，用于直接入库
 
     const location = useLocation()
 
@@ -82,19 +81,10 @@ const ReconciliationManagement: React.FC = () => {
                 await electron.reconciliation.importBankTransactions(batchId, file.path)
             }
 
-            // 根据是否有 PDF 解析数据选择导入路径
-            if (pdfInvoicesRef.current.length > 0) {
-                // PDF 路径：直接用结构化数据入库（含跨批次去重）
-                const importRes = await electron.reconciliation.importPdfInvoices(batchId, pdfInvoicesRef.current)
-                if (importRes.skippedDuplicates && importRes.skippedDuplicates.length > 0) {
-                    message.warning(`跨批次去重：跳过 ${importRes.skippedDuplicates.length} 张重复发票`)
-                }
-                pdfInvoicesRef.current = [] // 清空
-            } else {
-                // Excel 路径：原有导入逻辑
-                for (const file of invoiceFiles) {
-                    await electron.reconciliation.importInvoices(batchId, file.path)
-                }
+            // ✅ 统一路径：所有发票一律通过 Excel 文件导入
+            // PDF 发票已在 scanFolders 阶段解析为 Excel，这里只导入 Excel
+            for (const file of invoiceFiles) {
+                await electron.reconciliation.importInvoices(batchId, file.path)
             }
 
             setImportConfirmVisible(false)
@@ -156,9 +146,15 @@ const ReconciliationManagement: React.FC = () => {
             const bankFiles = bankRes.success ? bankRes.files : []
             let invoiceFiles = invoiceRes.success ? invoiceRes.files : []
 
-            console.log('invoiceFiles', invoicePath, invoiceFiles)
-            // 如果没有找到 Excel/CSV 发票文件，尝试扫描 PDF
-            if (invoiceFiles.length === 0) {
+            console.log('[Scan] 初始扫描 invoiceFiles:', invoicePath, invoiceFiles.map((f: FileInfo) => f.name))
+
+            // ✅ 核心逻辑：如果没有用户手动放置的 Excel 发票文件，则扫描 PDF 并生成 Excel
+            // 排除上次运行遗留的自动生成文件
+            const manualInvoiceFiles = invoiceFiles.filter(
+                (f: FileInfo) => !(f.name.startsWith('发票清单_') && f.name.endsWith('.xlsx'))
+            )
+
+            if (manualInvoiceFiles.length === 0) {
                 try {
                     const pdfRes = await electron.reconciliation.scanPdfFolder(invoicePath)
                     if (pdfRes.success && pdfRes.files.length > 0) {
@@ -172,7 +168,7 @@ const ReconciliationManagement: React.FC = () => {
                         const exportRes = await electron.reconciliation.exportInvoicesExcel(invoicePath)
                         message.destroy('pdf_parsing')
 
-                        console.log('pdfRes', pdfRes, exportRes)
+                        console.log('[Scan] PDF 解析结果:', exportRes)
                         if (exportRes.success) {
                             // 构造去重统计信息
                             const pr = exportRes.parseResult
@@ -181,15 +177,17 @@ const ReconciliationManagement: React.FC = () => {
                                 : ''
                             message.success(`PDF 解析完成：成功 ${pr?.successCount || 0} 张${dedupInfo}，已自动生成对账 Excel`)
 
-                            // 保存解析后的发票数据用于直接入库（含跨批次去重）
-                            if (exportRes.invoices && exportRes.invoices.length > 0) {
-                                pdfInvoicesRef.current = exportRes.invoices
-                            }
-
-                            // 重新扫描以获取生成的 Excel 文件
+                            // ✅ 重新扫描，获取刚生成的 Excel 文件作为唯一的发票数据来源
                             const newInvoiceRes = await electron.file.scanFolder(invoicePath)
                             if (newInvoiceRes.success) {
-                                invoiceFiles = newInvoiceRes.files
+                                // 只保留最新生成的 发票清单_*.xlsx（去掉旧的）
+                                const generatedExcels = newInvoiceRes.files
+                                    .filter((f: FileInfo) => f.name.startsWith('发票清单_') && f.name.endsWith('.xlsx'))
+                                    .sort((a: FileInfo, b: FileInfo) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
+
+                                // 只取最新的那一个生成文件
+                                invoiceFiles = generatedExcels.length > 0 ? [generatedExcels[0]] : []
+                                console.log('[Scan] 使用生成的 Excel 作为发票源:', invoiceFiles.map((f: FileInfo) => f.name))
                             }
                         } else {
                             let errorDetails = ''
@@ -205,6 +203,9 @@ const ReconciliationManagement: React.FC = () => {
                 } catch (e) {
                     console.error('PDF 扫描失败', e)
                 }
+            } else {
+                // 有手动 Excel 文件时，只用手动文件，排除自动生成的
+                invoiceFiles = manualInvoiceFiles
             }
 
             setScannedFiles({

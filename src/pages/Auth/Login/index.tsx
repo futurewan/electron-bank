@@ -57,7 +57,7 @@ function LoginPage(): JSX.Element {
             <div className={styles.card}>
                 {/* Logo 区域 */}
                 <div className={styles.logoSection}>
-                    <div className={styles.logoIcon}>💰</div>
+                    <img src="/logo.png" alt="Logo" className={styles.logoImage} />
                     <h1 className={styles.title}>AI 对账助手</h1>
                     <p className={styles.subtitle}>智能对账，轻松管理</p>
                 </div>

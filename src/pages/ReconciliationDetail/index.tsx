@@ -148,10 +148,35 @@ const ReconciliationDetail: React.FC = () => {
     }
   }
 
+  // 开始匹配
+  const handleStartMatching = async () => {
+    if (!processing && id) {
+      try {
+        const detectRes = await electron.reconciliation.detectProxyPayments(id)
+        if (detectRes.success && detectRes.proxyPayments && detectRes.proxyPayments.length > 0) {
+          const suggestRes = await electron.reconciliation.getSellerSuggestions(id)
+          setSellerSuggestions(suggestRes.suggestions || [])
+          setProxyPayments(detectRes.proxyPayments)
+          setProxyModalVisible(true)
+          return
+        }
+        startReconciliationProcess()
+      } catch (error) {
+        console.error('代付检测失败:', error)
+        startReconciliationProcess()
+      }
+    }
+  }
+
+  // ⚠️ 防止 autoImported 时核销被触发两次（React StrictMode / 快速导航）
+  const autoStartedRef = React.useRef(false)
+
   useEffect(() => {
     loadData()
-    if ((location.state as any)?.autoImported) {
+    if ((location.state as any)?.autoImported && !autoStartedRef.current) {
+      autoStartedRef.current = true
       setShowAutoImportAlert(true)
+      handleStartMatching()
     }
 
     // 获取传递的文件信息
@@ -204,26 +229,6 @@ const ReconciliationDetail: React.FC = () => {
       }
     }
   }, [id])
-
-  // 开始匹配
-  const handleStartMatching = async () => {
-    if (!processing && id) {
-      try {
-        const detectRes = await electron.reconciliation.detectProxyPayments(id)
-        if (detectRes.success && detectRes.proxyPayments && detectRes.proxyPayments.length > 0) {
-          const suggestRes = await electron.reconciliation.getSellerSuggestions(id)
-          setSellerSuggestions(suggestRes.suggestions || [])
-          setProxyPayments(detectRes.proxyPayments)
-          setProxyModalVisible(true)
-          return
-        }
-        startReconciliationProcess()
-      } catch (error) {
-        console.error('代付检测失败:', error)
-        startReconciliationProcess()
-      }
-    }
-  }
 
   const startReconciliationProcess = async () => {
     if (!id) return

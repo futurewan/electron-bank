@@ -13,6 +13,10 @@ import {
 import { ARCHIVE_SUB_DIRS } from '../utils/workspacePaths'
 import { getBankStatementPath, getInvoicePath, getArchivePath } from '../utils/workspacePaths'
 
+// ============================================
+// 类型定义与辅助函数
+// ============================================
+
 /**
  * 归档结果
  */
@@ -25,12 +29,30 @@ export interface ArchiveResult {
 }
 
 /**
- * 归档批次
- * 1. 在 00归档 下创建 YYYYMMDD-N 目录及子文件夹
- * 2. 移动源文件到归档目录
- * 3. 更新批次状态
+ * 健壮的重命名/移动函数
+ * 支持跨设备/分区移动（先复制后删除）
  */
-export async function archiveBatch(batchId: string): Promise<ArchiveResult> {
+function robustRename(src: string, dest: string): void {
+  try {
+    fs.renameSync(src, dest)
+  } catch (error: any) {
+    if (error.code === 'EXDEV') {
+      // 跨设备移动：复制后删除
+      fs.copyFileSync(src, dest)
+      fs.unlinkSync(src)
+    } else {
+      throw error
+    }
+  }
+}
+
+/**
+ * 归档批次原始文件与报告
+ * @param batchId 批次ID
+ * @param preCreatedArchiveInfo 可选：已预先创建的归档信息（避免生成重复目录）
+ */
+export async function archiveBatch(batchId: string, preCreatedArchiveInfo?: { dirPath: string; dirName: string }): Promise<ArchiveResult> {
+  const result: ArchiveResult = { success: false, movedFilesCount: 0 }
   try {
     // 1. 获取批次详情
     const batch = await getBatch(batchId)
@@ -47,16 +69,20 @@ export async function archiveBatch(batchId: string): Promise<ArchiveResult> {
     }
 
     // 3. 创建归档目录
-    // 逻辑变更：如果 batchId 符合 YYYYMMDD-N 格式，直接使用该名称作为归档文件夹名
-    // 否则使用 getNextArchiveDir 生成新的
+    // 确定归档目录
     let archiveInfo: { dirPath: string; dirName: string }
 
-    if (/^\d{8}-\d+$/.test(batchId)) {
-      const dirPath = path.join(getArchivePath(workspaceFolder), batchId)
-      archiveInfo = { dirPath, dirName: batchId }
+    if (preCreatedArchiveInfo) {
+      archiveInfo = preCreatedArchiveInfo
     } else {
-      const nextInfo = getNextArchiveDir(workspaceFolder)
-      archiveInfo = { dirPath: nextInfo.dirPath, dirName: nextInfo.dirName }
+      // 检查 batchId 是否已是 YYYYMMDD-N 格式 (如果是，可能已经归档过或指定了目录)
+      if (/^\d{8}-\d+$/.test(batchId)) {
+        const dirPath = path.join(getArchivePath(workspaceFolder), batchId)
+        archiveInfo = { dirPath, dirName: batchId }
+      } else {
+        const nextInfo = getNextArchiveDir(workspaceFolder)
+        archiveInfo = { dirPath: nextInfo.dirPath, dirName: nextInfo.dirName }
+      }
     }
 
     createArchiveSubDirs(archiveInfo.dirPath)
@@ -66,19 +92,67 @@ export async function archiveBatch(batchId: string): Promise<ArchiveResult> {
     // 4. 移动银行流水文件
     const bankFolder = getBankStatementPath(workspaceFolder)
     if (fs.existsSync(bankFolder)) {
-      movedCount += moveFiles(
-        bankFolder,
-        path.join(archiveInfo.dirPath, ARCHIVE_SUB_DIRS.BANK_STATEMENTS)
-      )
+      try {
+        const files = fs.readdirSync(bankFolder)
+        const supportedExts = ['.xlsx', '.xls', '.csv', '.pdf']
+
+        for (const file of files) {
+          // 过滤临时文件
+          if (file.startsWith('~$') || file.startsWith('.~') || file.startsWith('.')) {
+            continue
+          }
+
+          const ext = path.extname(file).toLowerCase()
+          if (supportedExts.includes(ext)) {
+            const srcPath = path.join(bankFolder, file)
+            // 确保是文件
+            if (fs.statSync(srcPath).isFile()) {
+              const destPath = path.join(archiveInfo.dirPath, ARCHIVE_SUB_DIRS.BANK_STATEMENTS, file)
+              // 如果目标已存在，添加后缀
+              let finalDestPath = destPath
+              if (fs.existsSync(finalDestPath)) {
+                const name = path.basename(file, ext)
+                const timestamp = Date.now()
+                finalDestPath = path.join(path.dirname(destPath), `${name}_${timestamp}${ext}`)
+              }
+              robustRename(srcPath, finalDestPath)
+              movedCount++
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[Archive] 移动银行流水失败:`, e)
+      }
     }
 
     // 5. 移动发票文件
     const invoiceFolder = getInvoicePath(workspaceFolder)
     if (fs.existsSync(invoiceFolder)) {
-      movedCount += moveFiles(
-        invoiceFolder,
-        path.join(archiveInfo.dirPath, ARCHIVE_SUB_DIRS.INVOICES)
-      )
+      try {
+        const invoiceFiles = fs.readdirSync(invoiceFolder).filter(f => !f.startsWith('.') && !f.startsWith('~$'))
+        const supportedExts = ['.xlsx', '.xls', '.csv', '.pdf'] // Assuming same supported extensions for invoices
+
+        for (const file of invoiceFiles) {
+          const ext = path.extname(file).toLowerCase()
+          if (supportedExts.includes(ext)) {
+            const srcPath = path.join(invoiceFolder, file)
+            if (fs.statSync(srcPath).isFile()) {
+              const destPath = path.join(archiveInfo.dirPath, ARCHIVE_SUB_DIRS.INVOICES, file)
+              // 如果目标已存在，添加后缀
+              let finalDestPath = destPath
+              if (fs.existsSync(finalDestPath)) {
+                const name = path.basename(file, ext)
+                const timestamp = Date.now()
+                finalDestPath = path.join(path.dirname(destPath), `${name}_${timestamp}${ext}`)
+              }
+              robustRename(srcPath, finalDestPath)
+              movedCount++
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[Archive] 移动发票文件失败:`, e)
+      }
     }
 
     // 6. 更新状态
@@ -96,50 +170,4 @@ export async function archiveBatch(batchId: string): Promise<ArchiveResult> {
     console.error('[Archive] Error:', error)
     return { success: false, error: String(error) }
   }
-}
-
-/**
- * 移动文件夹内的支持文件到目标目录
- */
-function moveFiles(sourceDir: string, targetDir: string): number {
-  let count = 0
-  try {
-    const files = fs.readdirSync(sourceDir)
-    const supportedExts = ['.xlsx', '.xls', '.csv', '.pdf']
-
-    for (const file of files) {
-      // 过滤临时文件
-      if (file.startsWith('~$') || file.startsWith('.~') || file.startsWith('.')) {
-        continue
-      }
-
-      const ext = path.extname(file).toLowerCase()
-      if (supportedExts.includes(ext)) {
-        const srcPath = path.join(sourceDir, file)
-        // 确保是文件
-        if (fs.statSync(srcPath).isFile()) {
-          const destPath = path.join(targetDir, file)
-
-          // 如果目标已存在，添加后缀
-          let finalDestPath = destPath
-          if (fs.existsSync(finalDestPath)) {
-            const name = path.basename(file, ext)
-            const timestamp = Date.now()
-            finalDestPath = path.join(targetDir, `${name}_${timestamp}${ext}`)
-          }
-
-          try {
-            fs.renameSync(srcPath, finalDestPath)
-            count++
-          } catch (e) {
-            console.error(`[Archive] Failed to move file ${file}:`, e)
-            // 继续处理下一个文件，不中断
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error(`[Archive] Failed to read source dir ${sourceDir}:`, error)
-  }
-  return count
 }

@@ -200,6 +200,7 @@ export async function executeRuleMatching(
     }
     if (isStopped(batchId)) throw new Error('任务被用户停止')
     const bank = bankTxns[i]
+    if (matchedBankIds.has(bank.id)) continue
     level2Processed++
 
     const normalizedBankName = normalizeName(bank.payerName)
@@ -282,6 +283,7 @@ export async function executeRuleMatching(
     }
     if (isStopped(batchId)) throw new Error('任务被用户停止')
     const bank = bankTxns[i]
+    if (matchedBankIds.has(bank.id)) continue
     level3Processed++
 
     const normalizedBankName = normalizeName(bank.payerName)
