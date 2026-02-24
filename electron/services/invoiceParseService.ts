@@ -276,9 +276,12 @@ export async function exportInvoicesToExcel(
             scriptDir = path.join(globalThis.process.cwd(), 'electron/python');
         }
 
-        // Use venv Python if available
-        const venvPython = path.join(scriptDir, '.venv/bin/python');
-        const pyPath = fs.existsSync(venvPython) ? venvPython : 'python3';
+        // Resolve Python executable from unified service logic.
+        // Packaged app must use bundled Python, never fallback to system python.
+        const pyPath = pythonService.getPythonExecutable();
+        if (!pyPath) {
+            return { success: false, error: '打包环境缺少内置 Python 运行时（resources/python/.venv）' };
+        }
 
         const scriptFile = path.join(scriptDir, 'main.py');
         if (!fs.existsSync(scriptFile)) {
@@ -488,4 +491,3 @@ export async function repairBrokenInvoices(
 
     return { repairedCount: repaired, failedCount: failed };
 }
-

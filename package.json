@@ -8,6 +8,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
+    "build:renderer": "tsc && vite build",
+    "build:mac:arm64": "bash scripts/build-mac.sh arm64",
+    "build:mac:x64": "bash scripts/build-mac.sh x64",
+    "build:mac:dual": "npm run build:renderer && bash scripts/build-mac.sh arm64 --skip-renderer && bash scripts/build-mac.sh x64 --skip-renderer",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "postinstall": "electron-builder install-app-deps"

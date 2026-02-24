@@ -24,3 +24,14 @@ release
 *.njsproj
 *.sln
 *.sw?
+
+# Python build artifacts (invoice parser experiments)
+electron/python/build/
+electron/python/dist/
+electron/python/*.spec
+electron/python/.venv/
+electron/python/.venv-arm64/
+electron/python/.venv-x64/
+**/__pycache__/
+*.pyc
+

@@ -30,7 +30,17 @@ npm run dev
 
 # 打包构建
 npm run build
+
+# macOS 双架构安装包（arm64 + x64）
+npm run build:mac:dual
 ```
+
+### macOS 双架构发布说明
+
+- 生成两个安装包：
+  - `...-arm64-Installer.dmg`（Apple Silicon）
+  - `...-x64-Installer.dmg`（Intel）
+- 用户按机器架构选择对应安装包下载。
 
 ## 项目结构
 

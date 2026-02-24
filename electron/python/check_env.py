@@ -7,7 +7,8 @@ def check_env():
     result = {
         "available": False,
         "python_version": sys.version,
-        "missing": []
+        "missing": [],
+        "errors": {}
     }
     
     # Check dependencies
@@ -17,8 +18,12 @@ def check_env():
     for package in required_packages:
         try:
             importlib.import_module(package)
-        except ImportError:
+        except ImportError as e:
             missing.append(package)
+            result["errors"][package] = str(e)
+        except Exception as e:
+            missing.append(package)
+            result["errors"][package] = str(e)
             
     if not missing:
         result["available"] = True

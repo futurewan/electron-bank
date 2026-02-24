@@ -1,13 +1,14 @@
 
-import { spawn } from 'node:child_process';
-import path from 'node:path';
 import { app } from 'electron';
+import { exec, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 
 export interface PythonEnvStatus {
     available: boolean;
     version?: string;
     missing?: string[];
+    errors?: Record<string, string>;
     error?: string;
 }
 
@@ -35,6 +36,48 @@ export class PythonService {
         return this.scriptPath;
     }
 
+    private resolveBundledPythonPath(scriptDir: string): string | null {
+        const candidates = [
+            path.join(scriptDir, '.venv/bin/python'),
+            path.join(scriptDir, '.venv/Scripts/python.exe'),
+        ];
+
+        for (const candidate of candidates) {
+            if (fs.existsSync(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private resolvePythonPath(): string | null {
+        const scriptDir = this.getScriptPath();
+
+        if (app.isPackaged) {
+            const bundledPython = this.resolveBundledPythonPath(scriptDir);
+            if (!bundledPython) {
+                return null;
+            }
+            this.pythonPath = bundledPython;
+            return this.pythonPath;
+        }
+
+        const venvPython = path.join(scriptDir, '.venv/bin/python');
+        const venvPythonWin = path.join(scriptDir, '.venv/Scripts/python.exe');
+
+        if (fs.existsSync(venvPython)) {
+            this.pythonPath = venvPython;
+        } else if (fs.existsSync(venvPythonWin)) {
+            this.pythonPath = venvPythonWin;
+        } else {
+            this.pythonPath = 'python3';
+        }
+
+        return this.pythonPath;
+    }
+
+    getPythonExecutable(): string | null {
+        return this.resolvePythonPath();
+    }
+
     /**
      * Check Python environment and dependencies
      */
@@ -47,21 +90,65 @@ export class PythonService {
             return { available: false, error: `Script not found at ${checkScript}` };
         }
 
-        // Check for venv
-        const venvPython = path.join(scriptDir, '.venv/bin/python');
-        const venvPythonWin = path.join(scriptDir, '.venv/Scripts/python.exe');
-
-        if (fs.existsSync(venvPython)) {
-            this.pythonPath = venvPython;
-        } else if (fs.existsSync(venvPythonWin)) {
-            this.pythonPath = venvPythonWin;
+        const resolvedPython = this.resolvePythonPath();
+        if (!resolvedPython) {
+            return {
+                available: false,
+                error: '打包环境缺少内置 Python 运行时（resources/python/.venv）。请重新打包并包含 .venv 依赖。',
+            };
         }
 
         try {
             // Fix: remove 'this' context issue inside runScript call
             // Pass undefined as last argument compliant with optional ProgressCallback
             const output = await this.runScript('check_env.py', [], undefined);
-            return JSON.parse(output);
+            const status = JSON.parse(output);
+
+            // 当遇到缺失依赖时：
+            // - 打包环境：直接报错（不依赖系统环境，不做运行时安装）
+            // - 开发环境：尝试自动安装到当前 Python 环境
+            if (!status.available && status.missing && status.missing.length > 0) {
+                if (app.isPackaged) {
+                    const details = status.errors
+                        ? Object.entries(status.errors)
+                            .map(([pkg, err]) => `${pkg}: ${String(err)}`)
+                            .join(' | ')
+                        : '';
+                    return {
+                        available: false,
+                        error: details
+                            ? `内置 Python 环境缺少/不可用依赖: ${status.missing.join(', ')}。详细: ${details}。请在构建机按目标架构重建 .venv 并重新打包。`
+                            : `内置 Python 环境缺少依赖: ${status.missing.join(', ')}。请在构建机预装依赖并重新打包。`,
+                    };
+                }
+
+                console.log(`[PythonService] Missing packages: ${status.missing.join(', ')}. Attempting to install...`);
+                try {
+                    await new Promise<void>((resolve, reject) => {
+                        const reqPath = path.join(scriptDir, 'requirements.txt');
+                        const cmd = `"${this.pythonPath}" -m pip install -r "${reqPath}"`;
+                        console.log(`[PythonService] Executing: ${cmd}`);
+                        exec(cmd, (error: any, stdout: string, stderr: string) => {
+                            if (error) {
+                                console.warn('[PythonService] pip install stderr:', stderr);
+                                reject(error);
+                            } else {
+                                console.log('[PythonService] pip install success:', stdout);
+                                resolve();
+                            }
+                        });
+                    });
+
+                    // 安装完成后，再次运行环境检测
+                    const newOutput = await this.runScript('check_env.py', [], undefined);
+                    return JSON.parse(newOutput);
+
+                } catch (installErr: any) {
+                    return { available: false, error: `缺少依赖且尝试自动安装失败: ${status.missing.join(', ')}` };
+                }
+            }
+
+            return status;
         } catch (error: any) {
             return { available: false, error: error.message };
         }
@@ -81,6 +168,12 @@ export class PythonService {
         onProgress?: ProgressCallback
     ): Promise<string> {
         return new Promise((resolve, reject) => {
+            const resolvedPython = this.resolvePythonPath();
+            if (!resolvedPython) {
+                reject(new Error('Bundled Python runtime not found in packaged app'));
+                return;
+            }
+
             const scriptFile = path.join(this.getScriptPath(), scriptName);
 
             console.log(`[PythonService] Running: ${this.pythonPath} ${scriptFile} ${args.join(' ')}`);
