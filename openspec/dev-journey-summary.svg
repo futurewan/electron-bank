@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f8fa"/>
+      <stop offset="100%" stop-color="#eef1f5"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f9fafb"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#9aa5b1" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="800" fill="url(#bg)"/>
+
+  <text x="60" y="90" font-size="36" font-family="Inter, Arial, sans-serif" fill="#1f2937">AI 对账助手 · 开发心路历程总结</text>
+  <text x="60" y="130" font-size="16" font-family="Inter, Arial, sans-serif" fill="#6b7280">从架构规范到对账能力与解析精度的逐步收敛</text>
+
+  <g transform="translate(60,170)">
+    <rect x="0" y="0" width="340" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">规范与基座</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">先文档后代码，统一技术栈与项目结构，</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">打稳 Electron + React 基础。</text>
+  </g>
+
+  <g transform="translate(430,170)">
+    <rect x="0" y="0" width="340" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">数据与 AI 底座</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">SQLite + Drizzle + electron-store，</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">纯本地架构稳住隐私与成本。</text>
+  </g>
+
+  <g transform="translate(800,170)">
+    <rect x="0" y="0" width="340" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">对账引擎成型</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">导入 → 规则匹配 → AI 补漏 → 异常 → 报告，</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">形成闭环流水线。</text>
+  </g>
+
+  <g transform="translate(60,350)">
+    <rect x="0" y="0" width="340" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">业务细节补齐</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">代付识别、付款方映射、维护入口，</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">让引擎落地真实场景。</text>
+  </g>
+
+  <g transform="translate(430,350)">
+    <rect x="0" y="0" width="340" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">发票解析（Node.js）</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">从 PDF 解析入手，建立解析、去重、导出流程，</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">先在 Node.js 侧跑通能力。</text>
+  </g>
+
+  <g transform="translate(800,350)">
+    <rect x="0" y="0" width="340" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">解析迁移（Python）</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">迁移到 Python（pdfplumber + pandas），</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">提升精度与可维护性。</text>
+  </g>
+
+  <g transform="translate(60,530)">
+    <rect x="0" y="0" width="520" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">流程与体验收敛</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">统一工作区、自动归档、模板化报告，</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">从“功能”走向“稳定可用”。</text>
+  </g>
+
+  <g transform="translate(640,530)">
+    <rect x="0" y="0" width="500" height="140" rx="16" fill="url(#card)" filter="url(#shadow)"/>
+    <text x="24" y="40" font-size="20" font-family="Inter, Arial, sans-serif" fill="#111827">AI 匹配增强</text>
+    <text x="24" y="72" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">语义匹配与破损发票修复，</text>
+    <text x="24" y="92" font-size="14" font-family="Inter, Arial, sans-serif" fill="#4b5563">提升准确率与自动化程度。</text>
+  </g>
+
+  <text x="60" y="740" font-size="14" font-family="Inter, Arial, sans-serif" fill="#9ca3af">基于 openspec 变更与提案文档整理</text>
+</svg>
