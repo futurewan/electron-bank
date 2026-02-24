@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { aiConfig, AIKeyManager } from '../config/aiStore';
+import { maskRemark } from './sanitizationService';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -102,14 +103,21 @@ export class AIService {
     // 记录请求日志
     console.log('[AI] --- DeepSeek Request ---');
     console.log(`[AI] Model: ${targetModel}`);
-    console.log(`[AI] Messages: ${JSON.stringify(messages, null, 2)}`);
+
+    // 全局兜底：对所有发送的消息内容进行隐私敏感信息脱敏
+    const sanitizedMessages = messages.map(m => ({
+      ...m,
+      content: maskRemark(m.content) || m.content
+    }))
+
+    console.log(`[AI] Messages (Sanitized): ${JSON.stringify(sanitizedMessages, null, 2)}`);
     console.log(`[AI] Temperature: ${temperature}`);
 
     while (retries > 0) {
       try {
         const response = await client.post('/chat/completions', {
           model: targetModel,
-          messages,
+          messages: sanitizedMessages,
           temperature,
           max_tokens: config.maxTokens || 4000,
           response_format: { type: 'json_object' } // DeepSeek supports this for strict JSON

@@ -158,6 +158,29 @@ const ReconciliationManagement: React.FC = () => {
                 try {
                     const pdfRes = await electron.reconciliation.scanPdfFolder(invoicePath)
                     if (pdfRes.success && pdfRes.files.length > 0) {
+                        // 检查 AI 模型配置
+                        const aiRes = await electron.ai.getConfig()
+                        const hasApiKey = aiRes.success && aiRes.config && aiRes.config.hasApiKey
+
+                        if (!hasApiKey) {
+                            const proceedAnyway = await new Promise((resolve) => {
+                                Modal.confirm({
+                                    title: 'AI 模型未配置',
+                                    content: '检测到您尚未配置 AI 模型的 API Key。PDF 智能解析功能需要 AI 模型支持。是否继续尝试解析（可能会失败）？',
+                                    okText: '继续解析',
+                                    cancelText: '去配置',
+                                    onOk: () => resolve(true),
+                                    onCancel: () => {
+                                        navigate('/settings')
+                                        resolve(false)
+                                    }
+                                })
+                            })
+                            if (!proceedAnyway) {
+                                return
+                            }
+                        }
+
                         message.open({
                             type: 'loading',
                             content: `检测到 ${pdfRes.files.length} 个 PDF 文件，正在智能解析...`,

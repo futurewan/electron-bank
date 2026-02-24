@@ -6,12 +6,13 @@ import { and, eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getDatabase } from '../database/client'
 import {
-  bankTransactions,
-  exceptions,
-  invoices,
-  matchResults,
-  NewException,
+    bankTransactions,
+    exceptions,
+    invoices,
+    matchResults,
+    NewException,
 } from '../database/schema'
+import { sanitizeTransaction } from './sanitizationService'
 
 // ============================================
 // 类型定义
@@ -445,7 +446,7 @@ export async function diagnoseExceptionsWithAI(
       Exception Type: ${exc.type}
       Severity: ${exc.severity}
       Context Data:
-      ${JSON.stringify(detail, null, 2)}
+      ${JSON.stringify(sanitizeTransaction(detail), null, 2)}
 
       Task:
       1. Diagnosis: Explain why this might have happened (e.g., missing invoice, wrong amount, timing difference, potential duplicate).

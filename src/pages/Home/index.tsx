@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Col, message, Row, Spin, Typography } from 'antd'
+import { Alert, Button, Card, Col, message, Modal, Row, Spin, Typography } from 'antd'
 import { CheckCircle } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -76,23 +76,48 @@ function Home(): JSX.Element {
                 message.info('工作目录已自动重建，请确保已上传对账数据到相应文件夹')
             }
 
-            // 自动生成批次名称：日期+对账
-            const date = new Date()
-            const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-            const baseName = `${dateStr}对账`
+            // 检查 AI 模型配置
+            const aiRes = await electron.ai.getConfig()
+            const hasApiKey = aiRes.success && aiRes.config && aiRes.config.hasApiKey
 
-            let finalName = baseName
-            let counter = 2
+            const startReconciliation = async () => {
+                // 自动生成批次名称：日期+对账
+                const date = new Date()
+                const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+                const baseName = `${dateStr}对账`
 
-            // 检查重名
-            const allResult = await electron.reconciliation.getAllBatches()
-            const existingNames = new Set((allResult.batches || []).map((b: any) => b.name))
-            while (existingNames.has(finalName)) {
-                finalName = `${baseName}-${counter}`
-                counter++
+                let finalName = baseName
+                let counter = 2
+
+                // 检查重名
+                const allResult = await electron.reconciliation.getAllBatches()
+                const existingNames = new Set((allResult.batches || []).map((b: any) => b.name))
+                while (existingNames.has(finalName)) {
+                    finalName = `${baseName}-${counter}`
+                    counter++
+                }
+
+                navigate('/reconciliation', { state: { autoStart: true, batchName: finalName } })
             }
 
-            navigate('/reconciliation', { state: { autoStart: true, batchName: finalName } })
+            if (!hasApiKey) {
+                setLoading(false)
+                Modal.confirm({
+                    title: 'AI 模型未配置',
+                    content: '检测到您尚未配置 AI 模型的 API Key。这可能会导致 PDF 解析和智能对账功能受限。是否继续对账？',
+                    okText: '继续对账',
+                    cancelText: '去配置',
+                    onOk: () => {
+                        setLoading(true)
+                        startReconciliation().finally(() => setLoading(false))
+                    },
+                    onCancel: () => {
+                        navigate('/settings')
+                    }
+                })
+            } else {
+                await startReconciliation()
+            }
         } catch (error) {
             console.error('检查配置失败:', error)
             message.error('检查系统配置失败')

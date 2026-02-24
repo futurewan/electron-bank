@@ -6,14 +6,15 @@ import { and, eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getDatabase } from '../database/client'
 import {
-  bankTransactions,
-  invoices,
-  matchResults,
-  payerMappings
+    bankTransactions,
+    invoices,
+    matchResults,
+    payerMappings
 } from '../database/schema'
 import { aiService } from './aiService'
-import { MatchingStats } from './matchingService'
 import { repairBrokenInvoices } from './invoiceParseService'
+import { MatchingStats } from './matchingService'
+import { maskRemark, sanitizeTransaction } from './sanitizationService'
 
 /**
  * AI 匹配进度回调
@@ -118,7 +119,6 @@ export async function executeAIMatching(
     // Top 5 candidates
     const topCandidates = candidates.slice(0, 5);
 
-    // 3. Construct Prompt
     const candidatesJson = topCandidates.map(inv => ({
       id: inv.id,
       seller: inv.sellerName,
@@ -127,17 +127,19 @@ export async function executeAIMatching(
       date: inv.invoiceDate ? inv.invoiceDate.toISOString().split('T')[0] : 'N/A',
       taxRate: inv.taxRate || 'N/A',
       items: inv.itemName || 'N/A',
-      remark: inv.remark || 'N/A' // Added invoice remark
+      remark: maskRemark(inv.remark) || 'N/A' // 脱敏发票备注
     }));
+
+    const sanitizedBankTx = sanitizeTransaction(bankTx);
 
     const prompt = `
     You are a professional financial reconciliation expert. Your task is to match a bank transaction to the most likely invoice from a list of candidates.
 
     Bank Transaction Details:
-    - Payer: ${bankTx.payerName}
-    - Amount: ${bankTx.amount}
-    - Date: ${bankTx.transactionDate ? bankTx.transactionDate.toISOString().split('T')[0] : 'N/A'}
-    - Remark/Description: ${bankTx.remark || 'None'}
+    - Payer: ${sanitizedBankTx.payerName}
+    - Amount: ${sanitizedBankTx.amount}
+    - Date: ${sanitizedBankTx.transactionDate ? sanitizedBankTx.transactionDate.toISOString().split('T')[0] : 'N/A'}
+    - Remark/Description: ${sanitizedBankTx.remark || 'None'}
 
     Candidate Invoices:
     ${JSON.stringify(candidatesJson, null, 2)}
@@ -272,10 +274,20 @@ export async function executeAIMatching(
       You are a professional financial reconciliation expert. Analyze these remaining items and find complex matches (one-to-one with indirect remarks, proxy payments, or handling fee cases).
 
       Bank Transactions:
-      ${JSON.stringify(remainingBankAfterLoop.map(b => ({ id: b.id, payer: b.payerName, amount: b.amount, remark: b.remark })), null, 2)}
+      ${JSON.stringify(remainingBankAfterLoop.map(b => ({
+        id: b.id,
+        payer: b.payerName,
+        amount: b.amount,
+        remark: maskRemark(b.remark)
+      })), null, 2)}
 
       Invoices:
-      ${JSON.stringify(remainingInvoicesAfterLoop.map(inv => ({ id: inv.id, seller: inv.sellerName, amount: inv.amount, remark: inv.remark })), null, 2)}
+      ${JSON.stringify(remainingInvoicesAfterLoop.map(inv => ({
+        id: inv.id,
+        seller: inv.sellerName,
+        amount: inv.amount,
+        remark: maskRemark(inv.remark)
+      })), null, 2)}
 
       Guidelines:
       1. Handling Fees: If the bank transaction remark explicitly mentions "handling fee" (手续费) and the amount difference between bank transaction and invoice is within 20 CNY, consider it a match. Set "isHandlingFee" to true.

@@ -2,6 +2,7 @@ import type { MenuProps } from 'antd'
 import { Layout, Menu } from 'antd'
 import { FileSearch, FileText, Home, Settings, Users } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import logoUrl from '../../assets/logo.png'
 import styles from './Layout.module.scss'
 
 const { Sider } = Layout
@@ -73,7 +74,7 @@ function Sidebar({ collapsed }: SidebarProps): JSX.Element {
         >
             {/* Logo 区域 */}
             <div className={styles.logo}>
-                <img src="/logo.png" alt="Logo" className={styles.logoImage} />
+                <img src={logoUrl} alt="Logo" className={styles.logoImage} />
                 {!collapsed && <span className={styles.logoText}>AI 对账助手</span>}
             </div>
 

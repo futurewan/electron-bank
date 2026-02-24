@@ -148,23 +148,69 @@ const ReconciliationDetail: React.FC = () => {
     }
   }
 
+  // 追踪 AI 警告是否已在本对话中被忽略
+  const [aiWarningDismissed, setAiWarningDismissed] = useState(false)
+
   // 开始匹配
   const handleStartMatching = async () => {
     if (!processing && id) {
-      try {
-        const detectRes = await electron.reconciliation.detectProxyPayments(id)
-        if (detectRes.success && detectRes.proxyPayments && detectRes.proxyPayments.length > 0) {
-          const suggestRes = await electron.reconciliation.getSellerSuggestions(id)
-          setSellerSuggestions(suggestRes.suggestions || [])
-          setProxyPayments(detectRes.proxyPayments)
-          setProxyModalVisible(true)
-          return
-        }
-        startReconciliationProcess()
-      } catch (error) {
-        console.error('代付检测失败:', error)
-        startReconciliationProcess()
+      await proceedWithMatching()
+    }
+  }
+
+  // 检查 AI 配置并返回是否可以继续
+  const checkAIConfig = async (): Promise<boolean> => {
+    if (aiWarningDismissed) return true
+
+    try {
+      const aiRes = await electron.ai.getConfig()
+      const hasApiKey = aiRes.success && aiRes.config && aiRes.config.hasApiKey
+
+      if (!hasApiKey) {
+        return new Promise((resolve) => {
+          Modal.confirm({
+            title: 'AI 模型未配置',
+            content: '检测到您尚未配置 AI 模型的 API Key。这可能会导致 PDF 解析和智能对账功能受限。是否继续对账？',
+            okText: '继续对账',
+            cancelText: '去配置',
+            onOk: () => {
+              setAiWarningDismissed(true)
+              resolve(true)
+            },
+            onCancel: () => {
+              navigate('/settings')
+              resolve(false)
+            }
+          })
+        })
       }
+      return true
+    } catch (e) {
+      console.error('Check AI config failed', e)
+      return true
+    }
+  }
+
+  const proceedWithMatching = async () => {
+    if (!id) return
+
+    // 检查 AI 模型配置
+    const canProceed = await checkAIConfig()
+    if (!canProceed) return
+
+    try {
+      const detectRes = await electron.reconciliation.detectProxyPayments(id)
+      if (detectRes.success && detectRes.proxyPayments && detectRes.proxyPayments.length > 0) {
+        const suggestRes = await electron.reconciliation.getSellerSuggestions(id)
+        setSellerSuggestions(suggestRes.suggestions || [])
+        setProxyPayments(detectRes.proxyPayments)
+        setProxyModalVisible(true)
+        return
+      }
+      startReconciliationProcess()
+    } catch (error) {
+      console.error('代付检测失败:', error)
+      startReconciliationProcess()
     }
   }
 
@@ -232,6 +278,11 @@ const ReconciliationDetail: React.FC = () => {
 
   const startReconciliationProcess = async () => {
     if (!id) return
+
+    // 再次检查 (防止从映射弹窗直接跳过来)
+    const canProceed = await checkAIConfig()
+    if (!canProceed) return
+
     setProxyModalVisible(false)
     setProcessing(true)
     setProgress({ stage: 'rule_matching', percentage: 0, message: '初始化对账流程...' })
@@ -493,8 +544,8 @@ const ReconciliationDetail: React.FC = () => {
         {/* 智能导入提示 */}
         {showAutoImportAlert && (
           <Alert
-            message="智能对账已启动"
-            description="系统已自动扫描并导入银行流水与发票文件，无需手动确认，正在进行智能匹配。"
+            message={batch?.status === 'completed' ? '已完成' : '智能对账已启动'}
+            description={batch?.status === 'completed' ? '系统已自动扫描并导入银行流水与发票文件，智能匹配已完成。' : '系统已自动扫描并导入银行流水与发票文件，无需手动确认，正在进行智能匹配。'}
             type="success"
             showIcon
             closable
