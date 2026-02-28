@@ -21,7 +21,8 @@ export function maskBankAccount(account: string | null | undefined): string | nu
  */
 export function maskRemark(remark: string | null | undefined): string | null {
   if (!remark) return null
-  let sanitized = remark.toString()
+  const original = remark.toString()
+  let sanitized = original
 
   // 1. 脱敏可能的银行账号 (13-19位连续数字)
   sanitized = sanitized.replace(/\b\d{13,19}\b/g, (val) => {
@@ -40,6 +41,10 @@ export function maskRemark(remark: string | null | undefined): string | null {
     })
   })
 
+  if (original !== sanitized) {
+    console.log(`[Sanitization] 备注已脱敏 -> 原文: "${original}" | 脱敏后: "${sanitized}"`)
+  }
+
   return sanitized
 }
 
@@ -52,7 +57,11 @@ export function sanitizeTransaction(tx: any): any {
 
   // 1. 物理删除或脱敏账号字段
   if ('payerAccount' in result) {
+    const original = result.payerAccount;
     result.payerAccount = maskBankAccount(result.payerAccount)
+    if (original !== result.payerAccount) {
+      console.log(`[Sanitization] 账号已脱敏: ${original} -> ${result.payerAccount}`)
+    }
   }
   if ('payer_account' in result) {
     result.payer_account = maskBankAccount(result.payer_account)
@@ -66,6 +75,7 @@ export function sanitizeTransaction(tx: any): any {
   // 3. 删除流水号（如果不需要 AI 环境识别的话）
   // 注意：某些对账可能需要流水号做语义关联，但用户明确要求不上传，所以我们移除敏感部分
   if ('transactionNo' in result) {
+    console.log(`[Sanitization] 删除流水号字段: ${result.transactionNo}`)
     delete result.transactionNo
   }
   if ('transaction_no' in result) {
@@ -75,7 +85,10 @@ export function sanitizeTransaction(tx: any): any {
   // 4. 删除账户余额字段（如果有的话）
   const balanceFields = ['balance', 'accountBalance', 'account_balance', 'curBalance', 'cur_balance']
   balanceFields.forEach(f => {
-    if (f in result) delete result[f]
+    if (f in result) {
+      console.log(`[Sanitization] 删除余额字段 [${f}]: ${result[f]}`)
+      delete result[f]
+    }
   })
 
   return result

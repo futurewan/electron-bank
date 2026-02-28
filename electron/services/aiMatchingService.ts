@@ -6,10 +6,10 @@ import { and, eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getDatabase } from '../database/client'
 import {
-    bankTransactions,
-    invoices,
-    matchResults,
-    payerMappings
+  bankTransactions,
+  invoices,
+  matchResults,
+  payerMappings
 } from '../database/schema'
 import { aiService } from './aiService'
 import { repairBrokenInvoices } from './invoiceParseService'
@@ -161,6 +161,8 @@ export async function executeAIMatching(
       "proxyMapping": { "personName": string, "companyName": string } | null // Fill if isProxy is true
     }
     `;
+
+    console.log(`\n========= [AI Match] 发送给大模型的 Prompt =========\n${prompt}\n=======================================================\n`);
 
     try {
       // 4. Call AI
